@@ -1,0 +1,77 @@
+import "./../App.css";
+import {
+  ChevronDown,
+  Download,
+  LayoutGrid,
+  Maximize2,
+  Play,
+  RefreshCw,
+  Search,
+  GitBranch,
+} from "lucide-react";
+
+type Props = {
+  projectName: string;
+  onRefresh: () => void;
+  onGenerate: () => void;
+};
+
+export function Topbar({ projectName, onRefresh, onGenerate }: Props) {
+  return (
+    <header className="topbar">
+      <div className="topbarLeft">
+        <div className="brand">
+          <GitBranch className="icon brandIcon" />
+          <h1 className="brandTitle">CodeGraph</h1>
+        </div>
+
+        <button className="projectPicker" type="button" onClick={onRefresh}>
+          <span className="projectName">{projectName}</span>
+          <ChevronDown className="icon" />
+        </button>
+
+        <div className="searchWrap">
+          <div className="searchBox">
+            <span className="searchIcon">
+              <Search className="icon" />
+            </span>
+            <input
+              className="searchInput"
+              placeholder="Search nodes, files, symbols..."
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="topbarRight">
+        <button
+          className="iconBtn"
+          title="Refresh (active file)"
+          type="button"
+          onClick={onRefresh}
+        >
+          <RefreshCw className="icon" />
+        </button>
+
+        <button className="iconBtn" title="Auto Layout" type="button">
+          <LayoutGrid className="icon" />
+        </button>
+
+        <button className="iconBtn" title="Fit to Screen" type="button">
+          <Maximize2 className="icon" />
+        </button>
+
+        <button className="iconBtn" title="Export" type="button">
+          <Download className="icon" />
+        </button>
+
+        <div className="divider" />
+
+        <button className="primaryBtn" type="button" onClick={onGenerate}>
+          <Play className="icon primaryBtnIcon" />
+          Generate
+        </button>
+      </div>
+    </header>
+  );
+}
