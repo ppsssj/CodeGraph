@@ -4,6 +4,22 @@ export type WebviewToExtMessage =
   | { type: "requestSelection" }
   | { type: "analyzeActiveFile" };
 
+/** calls(V1/V2) */
+export type CallV1 = { name: string; count: number };
+
+export type CallV2 = {
+  calleeName: string;
+  count: number;
+  declFile: string | null;
+  declRange: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  } | null;
+  isExternal: boolean;
+};
+
+export type CallItem = CallV1 | CallV2;
+
 /** Extension -> Webview */
 export type ExtToWebviewMessage =
   | {
@@ -47,7 +63,8 @@ export type ExtToWebviewMessage =
             | "const"
             | "unknown";
         }>;
-        calls: Array<{ name: string; count: number }>;
+        // ✅ V1/V2 호환
+        calls: CallItem[];
       } | null;
     };
 

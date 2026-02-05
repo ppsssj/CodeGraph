@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import "./App.css";
-
-import { FiltersBar, type ChipKey } from "./components/FiltersBar";
 import { Topbar } from "./components/Topbar";
+import { FiltersBar, type ChipKey } from "./components/FiltersBar";
 import { CanvasPane } from "./components/CanvasPane";
 import { Inspector } from "./components/Inspector";
-
 import {
   getVSCodeApi,
   isExtToWebviewMessage,
   type ExtToWebviewMessage,
-  type VSCodeApi,
 } from "./lib/vscode";
+
+const vscode = getVSCodeApi();
 
 type ActiveFilePayload = Extract<
   ExtToWebviewMessage,
@@ -27,67 +25,73 @@ type AnalysisPayload = Extract<
 >["payload"];
 
 export default function App() {
-  const vscode: VSCodeApi = useMemo(() => getVSCodeApi(), []);
-
-  const [active, setActive] = useState<ChipKey>("functions");
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
   const [selection, setSelection] = useState<SelectionPayload>(null);
   const [analysis, setAnalysis] = useState<AnalysisPayload>(null);
 
-  const requestActiveFile = () =>
-    vscode.postMessage({ type: "requestActiveFile" });
-  const requestSelection = () =>
-    vscode.postMessage({ type: "requestSelection" });
-
-  const analyzeActiveFile = () => {
-    // 최신 텍스트 확보 + 분석 실행(순서 중요 X, extension이 lastTextEditor 기반이라 안정)
-    requestActiveFile();
-    vscode.postMessage({ type: "analyzeActiveFile" });
-  };
+  const [activeChip, setActiveChip] = useState<ChipKey>("functions");
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
-      const msg = event.data;
-      if (!isExtToWebviewMessage(msg)) return;
+      if (!isExtToWebviewMessage(event.data)) return;
 
-      if (msg.type === "activeFile") setActiveFile(msg.payload ?? null);
-      if (msg.type === "selection") setSelection(msg.payload ?? null);
-      if (msg.type === "analysisResult") setAnalysis(msg.payload ?? null);
+      const msg = event.data;
+      if (msg.type === "activeFile") setActiveFile(msg.payload);
+      if (msg.type === "selection") setSelection(msg.payload);
+      if (msg.type === "analysisResult") setAnalysis(msg.payload);
     };
 
     window.addEventListener("message", onMessage);
 
-    // 초기 동기화
-    requestActiveFile();
-    requestSelection();
+    vscode.postMessage({ type: "requestActiveFile" });
+    vscode.postMessage({ type: "requestSelection" });
 
     return () => window.removeEventListener("message", onMessage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const hasData = Boolean(analysis);
+
+  const projectName = useMemo(() => {
+    if (activeFile?.fileName) return activeFile.fileName;
+    return "Active File";
+  }, [activeFile?.fileName]);
 
   return (
     <div className="appRoot">
       <Topbar
-        projectName="Workspace"
-        onRefresh={requestActiveFile}
-        onGenerate={analyzeActiveFile}
+        projectName={projectName}
+        onRefresh={() => {
+          vscode.postMessage({ type: "requestActiveFile" });
+          vscode.postMessage({ type: "requestSelection" });
+        }}
+        onGenerate={() => {
+          vscode.postMessage({ type: "analyzeActiveFile" });
+        }}
       />
 
-      <FiltersBar active={active} onChange={setActive} />
+      <FiltersBar active={activeChip} onChange={setActiveChip} />
 
-      <main className="main">
+      {/* ✅ App.css에 이미 정의된 가로 레이아웃 컨테이너 */}
+      <div className="main">
         <CanvasPane
-          hasData={false}
-          onGenerateFromActive={analyzeActiveFile}
-          onUseSelectionAsRoot={requestSelection}
+          hasData={hasData}
+          onGenerateFromActive={() => {
+            vscode.postMessage({ type: "analyzeActiveFile" });
+          }}
+          onUseSelectionAsRoot={() => {
+            vscode.postMessage({ type: "requestSelection" });
+          }}
         />
+
         <Inspector
           activeFile={activeFile}
           selection={selection}
           analysis={analysis}
-          onRefreshActive={requestActiveFile}
+          onRefreshActive={() => {
+            vscode.postMessage({ type: "requestActiveFile" });
+          }}
         />
-      </main>
+      </div>
     </div>
   );
 }
