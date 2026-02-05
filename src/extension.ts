@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import * as ts from "typescript";
 
 type WebviewToExtMessage =
   | { type: "requestActiveFile" }
@@ -201,7 +202,11 @@ function postAnalysis(panel: vscode.WebviewPanel) {
   const doc = editor.document;
   const text = doc.getText();
 
-  const result = analyzeTypescriptLike(text);
+  const result = analyzeTypeScriptWithTypes({
+    code: text,
+    fileName: doc.fileName,
+    languageId: doc.languageId,
+  });
 
   const payload: Extract<
     ExtToWebviewMessage,
@@ -226,11 +231,16 @@ function postAnalysis(panel: vscode.WebviewPanel) {
 }
 
 /**
- * 1차 MVP 파서(정규식 기반)
- * - 정확한 AST가 아니라 “보이는 결과를 빨리 만드는” 목적
- * - 다음 단계에서 TypeScript Compiler API로 대체할 예정
+ * TypeScript Compiler API(AST + TypeChecker) 기반 분석기
+ * - import/export를 AST로 정확 추출
+ * - calls는 CallExpression/NewExpression 기반으로 추출
+ * - PropertyAccess(예: c.inc())는 TypeChecker로 수신 타입을 구해 Counter.inc() 형태로 정규화
  */
-function analyzeTypescriptLike(code: string): {
+function analyzeTypeScriptWithTypes(args: {
+  code: string;
+  fileName: string;
+  languageId: string;
+}): {
   imports: Array<{
     source: string;
     specifiers: string[];
@@ -242,143 +252,313 @@ function analyzeTypescriptLike(code: string): {
   }>;
   calls: Array<{ name: string; count: number }>;
 } {
-  // comments 제거(대충)
-  const noComments = code
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+  const { code, fileName, languageId } = args;
 
-  // --- imports ---
+  const scriptKind = pickScriptKind(fileName, languageId);
+  const compilerOptions: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.CommonJS,
+    moduleResolution: ts.ModuleResolutionKind.NodeJs,
+    jsx: ts.JsxEmit.React,
+    allowJs: true,
+    checkJs: false,
+    esModuleInterop: true,
+    skipLibCheck: true,
+    noEmit: true,
+    strict: false,
+  };
+
+  // 활성 파일은 in-memory SourceFile로 공급하고, 나머지는 디스크에서 읽어오는 Host
+  const defaultHost = ts.createCompilerHost(compilerOptions, true);
+  const inMemoryFileName = fileName;
+
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    getSourceFile: (
+      requested,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    ) => {
+      if (path.resolve(requested) === path.resolve(inMemoryFileName)) {
+        return ts.createSourceFile(
+          requested,
+          code,
+          languageVersion,
+          /*setParentNodes*/ true,
+          scriptKind,
+        );
+      }
+      return defaultHost.getSourceFile(
+        requested,
+        languageVersion,
+        onError,
+        shouldCreateNewSourceFile,
+      );
+    },
+    fileExists: defaultHost.fileExists,
+    readFile: defaultHost.readFile,
+  };
+
+  const program = ts.createProgram([inMemoryFileName], compilerOptions, host);
+  const checker = program.getTypeChecker();
+  const sf = program.getSourceFile(inMemoryFileName);
+  if (!sf) return { imports: [], exports: [], calls: [] };
+
+  const imports = extractImports(sf);
+  const exports = extractExports(sf);
+  const calls = extractCallsNormalized(sf, checker);
+
+  return { imports, exports, calls };
+}
+
+function pickScriptKind(fileName: string, languageId: string): ts.ScriptKind {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".tsx") || languageId === "typescriptreact") {
+    return ts.ScriptKind.TSX;
+  }
+  if (lower.endsWith(".jsx") || languageId === "javascriptreact") {
+    return ts.ScriptKind.JSX;
+  }
+  if (lower.endsWith(".js") || languageId === "javascript") {
+    return ts.ScriptKind.JS;
+  }
+  return ts.ScriptKind.TS;
+}
+
+function isExported(node: ts.Node): boolean {
+  const mods = ts.getCombinedModifierFlags(node as ts.Declaration);
+  return (mods & ts.ModifierFlags.Export) !== 0;
+}
+
+function hasDefaultModifier(node: ts.Node): boolean {
+  const mods = ts.getCombinedModifierFlags(node as ts.Declaration);
+  return (mods & ts.ModifierFlags.Default) !== 0;
+}
+
+function extractImports(sf: ts.SourceFile): Array<{
+  source: string;
+  specifiers: string[];
+  kind: "named" | "default" | "namespace" | "side-effect" | "unknown";
+}> {
   const imports: Array<{
     source: string;
     specifiers: string[];
     kind: "named" | "default" | "namespace" | "side-effect" | "unknown";
   }> = [];
 
-  // import "x";
-  for (const m of noComments.matchAll(/import\s+["']([^"']+)["']\s*;?/g)) {
-    imports.push({ source: m[1], specifiers: [], kind: "side-effect" });
-  }
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st)) continue;
+    const source = ts.isStringLiteral(st.moduleSpecifier)
+      ? st.moduleSpecifier.text
+      : st.moduleSpecifier.getText(sf);
 
-  // import ... from "x";
-  for (const m of noComments.matchAll(
-    /import\s+([\s\S]*?)\s+from\s+["']([^"']+)["']\s*;?/g,
-  )) {
-    const raw = (m[1] ?? "").trim();
-    const source = m[2];
-
-    if (!raw) {
-      imports.push({ source, specifiers: [], kind: "unknown" });
+    // import "x";
+    if (!st.importClause) {
+      imports.push({ source, specifiers: [], kind: "side-effect" });
       continue;
     }
 
-    // namespace import: * as X
-    const ns = raw.match(/^\*\s+as\s+([A-Za-z0-9_$]+)/);
-    if (ns) {
-      imports.push({ source, specifiers: [ns[1]], kind: "namespace" });
-      continue;
-    }
+    const specifiers: string[] = [];
+    const { name, namedBindings } = st.importClause;
 
-    // named import: { a as b, c }
-    const named = raw.match(/^\{([\s\S]*?)\}$/);
-    if (named) {
-      const inside = named[1]
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((s) => s.replace(/\s+as\s+/g, " as "));
-      imports.push({ source, specifiers: inside, kind: "named" });
-      continue;
-    }
+    if (name) specifiers.push(name.text);
 
-    // default import: X
-    // default + named: X, { a }
-    const parts = raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (parts.length === 1) {
-      imports.push({ source, specifiers: [parts[0]], kind: "default" });
-    } else {
-      const defaultName = parts[0];
-      const rest = parts.slice(1).join(",").trim();
-      const specifiers: string[] = [defaultName];
-      const named2 = rest.match(/^\{([\s\S]*?)\}$/);
-      if (named2) {
-        specifiers.push(
-          ...named2[1]
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((s) => s.replace(/\s+as\s+/g, " as ")),
-        );
-        imports.push({ source, specifiers, kind: "named" });
-      } else {
-        imports.push({ source, specifiers, kind: "unknown" });
+    if (namedBindings) {
+      if (ts.isNamespaceImport(namedBindings)) {
+        specifiers.push(namedBindings.name.text);
+        imports.push({ source, specifiers, kind: "namespace" });
+        continue;
+      }
+      if (ts.isNamedImports(namedBindings)) {
+        for (const el of namedBindings.elements) {
+          const imported = el.propertyName?.text ?? el.name.text;
+          const local = el.name.text;
+          specifiers.push(
+            imported === local ? imported : `${imported} as ${local}`,
+          );
+        }
+        imports.push({
+          source,
+          specifiers,
+          kind: specifiers.length ? "named" : "unknown",
+        });
+        continue;
       }
     }
+
+    // default only
+    if (name && !namedBindings) {
+      imports.push({ source, specifiers, kind: "default" });
+      continue;
+    }
+
+    imports.push({ source, specifiers, kind: "unknown" });
   }
 
-  // --- exports ---
+  return imports;
+}
+
+function extractExports(sf: ts.SourceFile): Array<{
+  name: string;
+  kind: "function" | "class" | "type" | "interface" | "const" | "unknown";
+}> {
   const exports: Array<{
     name: string;
     kind: "function" | "class" | "type" | "interface" | "const" | "unknown";
   }> = [];
 
-  // export function Foo
-  for (const m of noComments.matchAll(
-    /\bexport\s+(?:async\s+)?function\s+([A-Za-z0-9_$]+)/g,
-  )) {
-    exports.push({ name: m[1], kind: "function" });
-  }
-  // export class Foo
-  for (const m of noComments.matchAll(/\bexport\s+class\s+([A-Za-z0-9_$]+)/g)) {
-    exports.push({ name: m[1], kind: "class" });
-  }
-  // export type Foo
-  for (const m of noComments.matchAll(/\bexport\s+type\s+([A-Za-z0-9_$]+)/g)) {
-    exports.push({ name: m[1], kind: "type" });
-  }
-  // export interface Foo
-  for (const m of noComments.matchAll(
-    /\bexport\s+interface\s+([A-Za-z0-9_$]+)/g,
-  )) {
-    exports.push({ name: m[1], kind: "interface" });
-  }
-  // export const Foo
-  for (const m of noComments.matchAll(/\bexport\s+const\s+([A-Za-z0-9_$]+)/g)) {
-    exports.push({ name: m[1], kind: "const" });
-  }
+  const push = (
+    name: string,
+    kind: "function" | "class" | "type" | "interface" | "const" | "unknown",
+  ) => {
+    if (!name) return;
+    exports.push({ name, kind });
+  };
 
-  // --- calls ---
-  // 아주 단순하게 identifier(...) 패턴 집계
-  const callCounts = new Map<string, number>();
-  for (const m of noComments.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) {
-    const name = m[1];
-
-    // 키워드/선언문 필터(대충)
-    if (
-      name === "if" ||
-      name === "for" ||
-      name === "while" ||
-      name === "switch" ||
-      name === "catch" ||
-      name === "function" ||
-      name === "return" ||
-      name === "typeof" ||
-      name === "new"
-    ) {
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && isExported(st)) {
+      push(
+        st.name?.text ?? (hasDefaultModifier(st) ? "default" : ""),
+        "function",
+      );
+      continue;
+    }
+    if (ts.isClassDeclaration(st) && isExported(st)) {
+      push(st.name?.text ?? (hasDefaultModifier(st) ? "default" : ""), "class");
+      continue;
+    }
+    if (ts.isTypeAliasDeclaration(st) && isExported(st)) {
+      push(st.name.text, "type");
+      continue;
+    }
+    if (ts.isInterfaceDeclaration(st) && isExported(st)) {
+      push(st.name.text, "interface");
+      continue;
+    }
+    if (ts.isVariableStatement(st) && isExported(st)) {
+      for (const decl of st.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name)) push(decl.name.text, "const");
+        else push(decl.name.getText(sf), "const");
+      }
       continue;
     }
 
-    callCounts.set(name, (callCounts.get(name) ?? 0) + 1);
+    if (ts.isExportDeclaration(st)) {
+      if (!st.exportClause) {
+        push("*", "unknown");
+        continue;
+      }
+      if (ts.isNamedExports(st.exportClause)) {
+        for (const el of st.exportClause.elements) {
+          const exported = el.name.text;
+          const local = el.propertyName?.text ?? el.name.text;
+          push(
+            exported === local ? exported : `${local} as ${exported}`,
+            "unknown",
+          );
+        }
+      }
+      continue;
+    }
+
+    if (ts.isExportAssignment(st)) {
+      push("default", "unknown");
+      continue;
+    }
   }
 
-  const calls = [...callCounts.entries()]
+  return exports;
+}
+
+function extractCallsNormalized(
+  sf: ts.SourceFile,
+  checker: ts.TypeChecker,
+): Array<{ name: string; count: number }> {
+  const counts = new Map<string, number>();
+
+  const bump = (name: string) => {
+    if (!name) return;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  };
+
+  const normalizeCallExpressionName = (expr: ts.Expression): string => {
+    if (ts.isIdentifier(expr)) return expr.text;
+
+    if (ts.isPropertyAccessExpression(expr)) {
+      const method = expr.name.text;
+      const recv = expr.expression;
+
+      // 타입 기반 정규화: Counter.inc / this.xxx 도 포함
+      if (
+        ts.isIdentifier(recv) ||
+        recv.kind === ts.SyntaxKind.ThisKeyword ||
+        recv.kind === ts.SyntaxKind.SuperKeyword
+      ) {
+        const t = checker.getTypeAtLocation(recv);
+        const typeName = friendlyTypeName(t, checker);
+        if (typeName) return `${typeName}.${method}`;
+      }
+
+      // fallback
+      return `${recv.getText(sf)}.${method}`;
+    }
+
+    if (ts.isParenthesizedExpression(expr))
+      return normalizeCallExpressionName(expr.expression);
+    if (ts.isElementAccessExpression(expr))
+      return `${expr.expression.getText(sf)}[...]`;
+    return expr.getText(sf);
+  };
+
+  const normalizeNewExpressionName = (expr: ts.Expression): string => {
+    if (ts.isIdentifier(expr)) return `new ${expr.text}`;
+    if (ts.isPropertyAccessExpression(expr)) {
+      const rhs = expr.name.text;
+      const lhs = expr.expression;
+      return `new ${lhs.getText(sf)}.${rhs}`;
+    }
+    return `new ${expr.getText(sf)}`;
+  };
+
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) {
+      bump(normalizeCallExpressionName(node.expression));
+    } else if (ts.isNewExpression(node)) {
+      bump(normalizeNewExpressionName(node.expression));
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sf);
+
+  return [...counts.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 40);
+}
 
-  return { imports, exports, calls };
+function friendlyTypeName(type: ts.Type, checker: ts.TypeChecker): string {
+  if (type.isUnion()) return checker.typeToString(type);
+
+  const aliasSym = type.aliasSymbol;
+  if (aliasSym) {
+    const aliased =
+      aliasSym.flags & ts.SymbolFlags.Alias
+        ? checker.getAliasedSymbol(aliasSym)
+        : aliasSym;
+    return aliased.getName();
+  }
+
+  const sym = type.getSymbol();
+  if (sym) {
+    const s =
+      sym.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(sym) : sym;
+    const name = s.getName();
+    if (name && name !== "__type") return name;
+  }
+
+  return checker.typeToString(type);
 }
 
 function getWebviewHtml(
@@ -389,14 +569,12 @@ function getWebviewHtml(
   const indexPath = path.join(webviewDistPath, "index.html");
   let html = fs.readFileSync(indexPath, "utf8");
 
-  // /assets/... -> webview uri 치환
   const assetBaseUri = webview
     .asWebviewUri(vscode.Uri.file(webviewDistPath))
     .toString();
   html = html.replace(/href="\//g, `href="${assetBaseUri}/`);
   html = html.replace(/src="\//g, `src="${assetBaseUri}/`);
 
-  // CSP
   const csp = [
     `default-src 'none';`,
     `img-src ${webview.cspSource} https: data:;`,
