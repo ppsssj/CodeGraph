@@ -1,7 +1,7 @@
 <h1 align="center">CodeGraph (VS Code Extension + Webview)</h1>
 
 <p align="center">
-  <img src="assets/Logo.png" alt="CodeGraph Logo" width="220" />
+  <img src="assets/logo.svg" alt="CodeGraph Logo" width="220" />
 </p>
 
 <p align="center">
