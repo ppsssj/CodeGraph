@@ -57,12 +57,29 @@ function buildLayout(nodes: GraphNode[]) {
 }
 
 /** Custom node so we always render title/subtitle (default node expects data.label). */
-function CodeNode({ data }: { data: { title: string; subtitle: string } }) {
+function CodeNode({
+  data,
+  selected,
+}: {
+  data: { title: string; subtitle: string; kind: string };
+  selected?: boolean;
+}) {
   return (
-    <div className="cgNode">
-      {/* edges attach here */}
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+    <div
+      className={[
+        "cgNode",
+        `cgNode--${data.kind}`,
+        selected ? "cgNode--selected" : "",
+      ].join(" ")}
+    >
+      <Handle type="target" position={Position.Left} className="cgHandle" />
+      <Handle type="source" position={Position.Right} className="cgHandle" />
+
+      <div className="cgNodeTop">
+        <span className={`cgBadge cgBadge--${data.kind}`}>
+          {String(data.kind).toUpperCase()}
+        </span>
+      </div>
 
       <div className="cgNodeTitle">{data.title}</div>
       <div className="cgNodeSub">{data.subtitle}</div>
@@ -85,7 +102,7 @@ function toReactFlowNodes(graph?: GraphPayload): Node[] {
       id: n.id,
       position: pos,
       type: "code",
-      data: { title: nodeTitle(n), subtitle },
+      data: { title: nodeTitle(n), subtitle, kind: n.kind },
     } satisfies Node;
   });
 }
@@ -93,13 +110,17 @@ function toReactFlowNodes(graph?: GraphPayload): Node[] {
 function toReactFlowEdges(graph?: GraphPayload): Edge[] {
   if (!graph) return [];
   return graph.edges.map((e) => {
+    const cls =
+      e.kind === "constructs"
+        ? "cgEdge cgEdge--constructs"
+        : "cgEdge cgEdge--calls";
+
     return {
       id: e.id,
       source: e.source,
       target: e.target,
       type: "smoothstep",
-      animated: false,
-      style: { strokeWidth: 2, stroke: "rgba(255,255,255,0.75)" },
+      className: cls,
       markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
     } satisfies Edge;
   });
