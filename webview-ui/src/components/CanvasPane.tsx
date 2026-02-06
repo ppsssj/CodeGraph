@@ -5,10 +5,12 @@ import { useMemo, useRef } from "react";
 import ReactFlow, {
   Background,
   ReactFlowProvider,
+  MarkerType,
   type Edge,
   type Node,
   type ReactFlowInstance,
 } from "reactflow";
+
 import { Crosshair, Network, Sigma, ZoomIn, ZoomOut } from "lucide-react";
 import type { GraphNode, GraphPayload } from "../lib/vscode";
 
@@ -91,6 +93,8 @@ function toReactFlowEdges(graph?: GraphPayload): Edge[] {
       target: e.target,
       type: "smoothstep",
       animated: false,
+      style: { strokeWidth: 2, stroke: "rgba(255,255,255,0.75)" },
+      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
     } satisfies Edge;
   });
 }
