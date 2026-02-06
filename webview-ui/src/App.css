@@ -1,5 +1,7 @@
-/* VS Code Webview: 외부 폰트/아이콘 없이도 안전하게 동작하는 기본 스타일
-   - 추후 테마 변수(--vscode-*)로 더 치환 가능
+/*
+  CodeGraph Webview UI (VS Code Extension)
+  - Responsive: desktop split view → compact stacked layout
+  - Theme-safe: uses VS Code CSS variables with fallbacks
 */
 
 :root {
@@ -19,13 +21,12 @@
 
   --inputBg: var(--vscode-input-background, rgba(255, 255, 255, 0.06));
   --inputFg: var(--vscode-input-foreground, #ffffff);
-  --placeholder: var(--vscode-input-placeholderForeground, rgba(230, 238, 252, 0.55));
+  --placeholder: var(--vscode-input-placeholderForeground,
+      rgba(230, 238, 252, 0.55));
 
   --canvasBg: var(--vscode-editor-background, #0b0f18);
-  --bg-canvas: var(--canvasBg);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
-
 
 * {
   box-sizing: border-box;
@@ -41,18 +42,23 @@ body,
 body {
   background: var(--bg);
   color: var(--fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+    "Helvetica Neue", Arial;
   overflow: hidden;
+  /* webview: keep scroll inside panels */
 }
+
+/* ---------- App Layout ---------- */
 
 .appRoot {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
-/* “아이콘”은 현재 텍스트 기반 placeholder.
-   다음 단계에서 SVG 아이콘으로 교체 예정 */
+/* Common icon sizing */
 .icon {
   width: 16px;
   height: 16px;
@@ -60,7 +66,6 @@ body {
   user-select: none;
   flex: 0 0 auto;
 }
-
 
 .brandIcon {
   width: 14px;
@@ -73,6 +78,18 @@ body {
   margin-right: 6px;
 }
 
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+.mutedText {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- Topbar ---------- */
+
 .topbar {
   height: 44px;
   display: flex;
@@ -81,12 +98,17 @@ body {
   padding: 0 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+  gap: 12px;
+  min-width: 0;
+  flex: 0 0 auto;
 }
 
 .topbarLeft {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .brand {
@@ -115,6 +137,8 @@ body {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  min-width: 0;
+  max-width: 360px;
 }
 
 .projectPicker:hover {
@@ -125,12 +149,17 @@ body {
   font-size: 12px;
   font-weight: 600;
   opacity: 0.95;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
 }
 
 .searchWrap {
   display: block;
-  min-width: 260px;
-  max-width: 420px;
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: 520px;
 }
 
 .searchBox {
@@ -140,6 +169,7 @@ body {
   color: var(--inputFg);
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .searchIcon {
@@ -155,6 +185,7 @@ body {
   color: var(--inputFg);
   font-size: 12px;
   padding: 0 10px;
+  min-width: 0;
 }
 
 .searchInput::placeholder {
@@ -165,6 +196,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .divider {
@@ -218,6 +250,8 @@ body {
   background: var(--primaryHover);
 }
 
+/* ---------- Filters Bar ---------- */
+
 .filtersBar {
   height: 40px;
   display: flex;
@@ -226,6 +260,8 @@ body {
   padding: 0 14px;
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .filtersLabel {
@@ -234,6 +270,7 @@ body {
   font-weight: 800;
   color: var(--muted);
   margin-right: 6px;
+  white-space: nowrap;
 }
 
 .chip {
@@ -249,6 +286,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .chip:hover {
@@ -266,19 +305,27 @@ body {
   font-weight: 900;
 }
 
+/* ---------- Main Split ---------- */
+
 .main {
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
+  min-width: 0;
 }
+
+/* ---------- Canvas ---------- */
 
 .canvas {
   flex: 1;
   position: relative;
-  background: var(--bg-canvas);
+  background: var(--canvasBg);
   display: grid;
   place-items: center;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 }
 
 .canvasGrid {
@@ -352,7 +399,6 @@ body {
   background: var(--primaryHover);
 }
 
-
 .ctaIcon {
   width: 14px;
   height: 14px;
@@ -388,16 +434,21 @@ body {
 
 .controlSep {
   height: 1px;
-  background: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.1);
   margin: 0 10px;
 }
 
+/* ---------- Inspector (Right Panel) ---------- */
+
 .inspector {
   width: 320px;
+  min-width: 260px;
+  max-width: 420px;
   border-left: 1px solid var(--border);
   background: var(--panel);
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .inspectorHeader {
@@ -406,6 +457,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .inspectorHeader h1 {
@@ -426,6 +480,7 @@ body {
 .inspectorBody {
   flex: 1;
   overflow: auto;
+  min-height: 0;
 }
 
 .inspectorPad {
@@ -434,6 +489,8 @@ body {
   flex-direction: column;
   gap: 14px;
 }
+
+/* ---------- Cards / Panels ---------- */
 
 .nodeCard {
   border-radius: 10px;
@@ -474,6 +531,7 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .nodeType {
@@ -488,6 +546,9 @@ body {
   font-size: 14px;
   font-weight: 900;
   color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nodeOpenIcon {
@@ -513,12 +574,14 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .panel {
   border-radius: 10px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
+  min-width: 0;
 }
 
 .panelHeader {
@@ -530,6 +593,8 @@ body {
   font-weight: 900;
   letter-spacing: 0.08em;
   color: var(--muted);
+  min-width: 0;
+  gap: 10px;
 }
 
 .panelBody {
@@ -537,31 +602,100 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
-.fieldTop {
+/* ---------- Lists / Tags ---------- */
+
+.sectionTitle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.field label {
+  gap: 10px;
+  color: var(--muted);
   font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sectionTitleLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kvList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kvRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  min-width: 0;
+}
+
+.kvKey {
+  opacity: 0.92;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kvVal {
+  opacity: 0.78;
+  text-align: right;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tagGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  max-width: 100%;
+}
+
+.tagKind {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+
+.tagName {
+  font-size: 12px;
   font-weight: 800;
-  color: #d7e2ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-.primary {
-  color: var(--primary);
-}
-
-.range {
-  width: 100%;
-}
+/* ---------- (Optional) Tabs / List styles (kept for future UI) ---------- */
 
 .select {
   width: 100%;
@@ -604,7 +738,7 @@ body {
 .tab.active {
   color: var(--primary);
   border-bottom: 2px solid var(--primary);
-  background: rgba(19, 91, 236, 0.10);
+  background: rgba(19, 91, 236, 0.1);
 }
 
 .list {
@@ -640,168 +774,90 @@ body {
 }
 
 .chev {
-  opacity: 0.0;
+  opacity: 0;
 }
 
 .listItem:hover .chev {
   opacity: 0.7;
 }
 
-.amber {
-  color: #f59e0b;
+/* ---------- Responsive ---------- */
+
+/* Medium: reduce right panel width & tighten topbar */
+@media (max-width: 960px) {
+  .searchWrap {
+    max-width: 360px;
+    min-width: 140px;
+  }
+
+  .inspector {
+    width: 280px;
+    min-width: 220px;
+  }
+
+  .projectName {
+    max-width: 200px;
+  }
 }
 
-.primaryColor {
-  color: var(--primary);
+/* Small: stack panels (canvas top, inspector bottom) */
+@media (max-width: 720px) {
+  .topbar {
+    padding: 0 10px;
+  }
+
+  .searchWrap {
+    display: none;
+  }
+
+  .divider {
+    display: none;
+  }
+
+  .primaryBtn {
+    padding: 0 10px;
+  }
+
+  .filtersBar {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .filtersBar::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .main {
+    flex-direction: column;
+  }
+
+  .inspector {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    /* VS Code extension panel feel */
+    flex: 0 0 44vh;
+  }
+
+  .canvas {
+    flex: 1 1 auto;
+  }
 }
 
-.progress {
-  padding: 14px;
-  border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
-}
+/* Extra small: hide brand title, tighten buttons */
+@media (max-width: 420px) {
+  .brandTitle {
+    display: none;
+  }
 
-.progressTop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  font-weight: 900;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
+  .projectName {
+    max-width: 140px;
+  }
 
-.progressBar {
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.10);
-  overflow: hidden;
-}
-
-.progressFill {
-  width: 100%;
-  height: 100%;
-  background: var(--primary);
-}
-
-.statusbar {
-  height: 26px;
-  padding: 0 10px;
-  background: var(--primary);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: #fff;
-  user-select: none;
-}
-
-.statusLeft,
-.statusRight {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.statusItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.statusBtn {
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  color: #fff;
-  background: transparent;
-}
-
-.statusBtn:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.mutedText {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.sectionTitle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sectionTitleLeft {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.kvList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.kvRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.kvKey {
-  opacity: 0.92;
-}
-
-.kvVal {
-  opacity: 0.78;
-  text-align: right;
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tagGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.tagKind {
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-
-.tagName {
-  font-size: 12px;
-  font-weight: 800;
+  .iconBtn {
+    width: 30px;
+    height: 30px;
+  }
 }
