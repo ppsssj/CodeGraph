@@ -1,8 +1,12 @@
-# CodeGraph (VS Code Extension + Webview)
+<h1 align="center">CodeGraph (VS Code Extension + Webview)</h1>
 
-![Logo](assets/Logo.png)
+<p align="center">
+  <img src="assets/Logo.png" alt="CodeGraph Logo" width="220" />
+</p>
 
-CodeGraph는 **VS Code 확장(Extension Host)**과 **Webview(React + Vite)**로 구성된 코드 분석/시각화 도구의 MVP입니다.
+<p align="center">
+  CodeGraph는 <b>VS Code 확장(Extension Host)</b>과 <b>Webview(React + Vite)</b>로 구성된 코드 분석/시각화 도구의 MVP입니다.
+</p>
 
 ---
 
