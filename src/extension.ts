@@ -21,7 +21,7 @@ type AnalysisCallV2 = {
   isExternal: boolean;
 };
 
-type GraphNodeKind = "function" | "method" | "class" | "external";
+type GraphNodeKind = "file" | "function" | "method" | "class" | "external";
 type GraphNode = {
   id: string;
   kind: GraphNodeKind;
@@ -281,6 +281,13 @@ function postAnalysis(panel: vscode.WebviewPanel) {
     graph: result.graph,
   };
   console.log("[analysis.calls sample]", result.calls.slice(0, 6));
+  console.log(
+    "[analysis.graph counts]",
+    "nodes=",
+    result.graph.nodes.length,
+    "edges=",
+    result.graph.edges.length,
+  );
 
   panel.webview.postMessage({
     type: "analysisResult",
@@ -533,8 +540,8 @@ function extractExports(sf: ts.SourceFile): Array<{
 
 /**
  * MVP graph builder: active-file only
- * - Nodes: function/class/method (named only)
- * - Edges: calls/new constructs (within active file only)
+ * - Nodes: file/function/class/method (named only)
+ * - Edges: calls/new constructs (incl. top-level via file node)
  */
 function buildActiveFileGraph(
   sf: ts.SourceFile,
@@ -548,6 +555,27 @@ function buildActiveFileGraph(
 
   const mkId = (kind: GraphNodeKind, name: string, pos: number) =>
     `${kind}:${name}@${pos}`;
+
+  const sourceFileRange = () => {
+    const endPos = sf.getEnd();
+    const endLC = sf.getLineAndCharacterOfPosition(endPos);
+    return {
+      start: { line: 0, character: 0 },
+      end: { line: endLC.line, character: endLC.character },
+    };
+  };
+
+  // ✅ 0) file/module root node (top-level owner)
+  const filePos = 0;
+  const fileNameBase = path.basename(sf.fileName);
+  const fileNodeId = mkId("file", fileNameBase, filePos);
+  nodes.push({
+    id: fileNodeId,
+    kind: "file",
+    name: fileNameBase,
+    file: sf.fileName,
+    range: sourceFileRange(),
+  });
 
   const pushNode = (
     decl: ts.Declaration,
@@ -652,11 +680,11 @@ function buildActiveFileGraph(
     edges.push({ id: key, kind: edgeKind, source: srcId, target: tgtId });
   };
 
-  const walk = (node: ts.Node, ownerId: string | null) => {
+  const walk = (node: ts.Node, ownerId: string) => {
     // owner switches
     if (ts.isFunctionDeclaration(node) && node.name && node.body) {
       const pos = node.getStart(sf, false);
-      const id = idByDeclPos.get(pos) ?? null;
+      const id = idByDeclPos.get(pos);
       const nextOwner = id ?? ownerId;
       walk(node.body, nextOwner);
       return;
@@ -669,14 +697,14 @@ function buildActiveFileGraph(
       ts.isIdentifier(node.name)
     ) {
       const pos = node.getStart(sf, false);
-      const id = idByDeclPos.get(pos) ?? null;
+      const id = idByDeclPos.get(pos);
       const nextOwner = id ?? ownerId;
       walk(node.body, nextOwner);
       return;
     }
 
     // edge detection
-    if (ownerId && ts.isCallExpression(node)) {
+    if (ts.isCallExpression(node)) {
       const targetPos = resolveTargetDeclPos(node.expression, "calls");
       if (targetPos != null) {
         const tgtId = idByDeclPos.get(targetPos);
@@ -684,7 +712,7 @@ function buildActiveFileGraph(
       }
     }
 
-    if (ownerId && ts.isNewExpression(node)) {
+    if (ts.isNewExpression(node)) {
       const targetPos = resolveTargetDeclPos(node.expression, "constructs");
       if (targetPos != null) {
         const tgtId = idByDeclPos.get(targetPos);
@@ -695,7 +723,8 @@ function buildActiveFileGraph(
     ts.forEachChild(node, (c) => walk(c, ownerId));
   };
 
-  walk(sf, null);
+  // ✅ IMPORTANT: start from file node so top-level calls produce edges
+  walk(sf, fileNodeId);
 
   return { nodes, edges };
 }
@@ -918,23 +947,38 @@ function getWebviewHtml(
   const assetBaseUri = webview
     .asWebviewUri(vscode.Uri.file(webviewDistPath))
     .toString();
-  html = html.replace(/href="\//g, `href="${assetBaseUri}/`);
-  html = html.replace(/src="\//g, `src="${assetBaseUri}/`);
 
-  const csp = [
-    `default-src 'none';`,
-    `img-src ${webview.cspSource} https: data:;`,
-    `style-src ${webview.cspSource} 'unsafe-inline';`,
-    `script-src ${webview.cspSource};`,
-    `font-src ${webview.cspSource} https: data:;`,
-  ].join(" ");
+  // Replace base href and asset URLs
+  html = html.replace(
+    /<base href="[^"]*" ?\/?>/g,
+    `<base href="${assetBaseUri}/" />`,
+  );
+  html = html.replace(
+    /"(\/assets\/[^"]+)"/g,
+    (_, p1) => `"${assetBaseUri}${p1}"`,
+  );
+
+  // CSP (minimal)
+  const cspSource = webview.cspSource;
+  const nonce = getNonce();
 
   html = html.replace(
-    "</head>",
-    `<meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    /<meta http-equiv="Content-Security-Policy" content="[^"]*"\s*\/?>/g,
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">`,
   );
+
+  // Ensure script tags have nonce
+  html = html.replace(/<script /g, `<script nonce="${nonce}" `);
 
   return html;
 }
 
-export function deactivate() {}
+function getNonce() {
+  let text = "";
+  const possible =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}

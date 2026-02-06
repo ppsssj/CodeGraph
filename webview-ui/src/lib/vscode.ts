@@ -24,7 +24,12 @@ export type CallItem = CallV1 | CallV2;
 export type Position = { line: number; character: number };
 export type Range = { start: Position; end: Position };
 
-export type GraphNodeKind = "function" | "method" | "class" | "external";
+export type GraphNodeKind =
+  | "file"
+  | "function"
+  | "method"
+  | "class"
+  | "external";
 
 export type GraphNode = {
   id: string;
