@@ -1,10 +1,7 @@
 <h1 align="center">CodeGraph (VS Code Extension + Webview)</h1>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/Logo-dark.png">
-    <img alt="CodeGraph Logo" src="assets/Logo-light.png" width="220">
-  </picture>
+  <img src="assets/Logo.png" alt="CodeGraph Logo" width="220" />
 </p>
 
 <p align="center">
