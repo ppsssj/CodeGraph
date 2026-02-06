@@ -1,6 +1,6 @@
 # CodeGraph (VS Code Extension + Webview)
 
-![CodeGraph Demo](assets/demo1.png)
+![Logo](assets/Logo.png)
 
 CodeGraph는 **VS Code 확장(Extension Host)**과 **Webview(React + Vite)**로 구성된 코드 분석/시각화 도구의 MVP입니다.
 
@@ -16,15 +16,15 @@ CodeGraph는 **VS Code Extension Host**(백엔드 역할)와 **Webview UI**(프�
 ```mermaid
 flowchart LR
   subgraph VSCode[VS Code]
-    EH[Extension Host\n(src/extension.ts)]
-    WV[Webview UI\n(webview-ui: React + Vite)]
+    EH["Extension Host: src/extension.ts"]
+    WV["Webview UI: webview-ui (React + Vite)"]
   end
 
   EH <-->|postMessage| WV
 
-  EH -->|read| AE[Active Editor Text]
-  EH -->|read| SEL[Selection Range]
-  EH -->|analyze| AST[Parser / Analyzer]
+  EH -->|read| AE["Active Editor Text"]
+  EH -->|read| SEL["Selection Range"]
+  EH -->|analyze| AST["Parser / Analyzer"]
   AST --> EH
   EH -->|emit results| WV
 ```
