@@ -371,6 +371,11 @@ body {
   stroke-width: 1.2;
 }
 
+.react-flow__handle {
+  opacity: 0;
+}
+
+
 .react-flow__edge.selected .react-flow__edge-path {
   stroke: rgba(19, 91, 236, 0.85);
 }

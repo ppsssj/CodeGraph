@@ -6,6 +6,8 @@ import ReactFlow, {
   Background,
   ReactFlowProvider,
   MarkerType,
+  Handle,
+  Position,
   type Edge,
   type Node,
   type ReactFlowInstance,
@@ -58,6 +60,10 @@ function buildLayout(nodes: GraphNode[]) {
 function CodeNode({ data }: { data: { title: string; subtitle: string } }) {
   return (
     <div className="cgNode">
+      {/* edges attach here */}
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
+
       <div className="cgNodeTitle">{data.title}</div>
       <div className="cgNodeSub">{data.subtitle}</div>
     </div>
