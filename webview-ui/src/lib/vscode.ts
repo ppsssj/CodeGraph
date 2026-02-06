@@ -81,7 +81,32 @@ declare global {
 }
 
 export function getVSCodeApi(): VSCodeApi {
-  return window.acquireVsCodeApi();
+  // In the VS Code Webview this function is provided by the host.
+  // During local dev (vite) `window.acquireVsCodeApi` is undefined —
+  // provide a safe fallback so the UI can run in the browser.
+  if (typeof window.acquireVsCodeApi === "function") {
+    return window.acquireVsCodeApi();
+  }
+
+  // Dev fallback: log posted messages and keep simple state.
+  let __vscode_state: unknown = undefined;
+  return {
+    postMessage: (msg: WebviewToExtMessage) => {
+      // Log for dev; consumers can still observe window "message" if needed.
+      // eslint-disable-next-line no-console
+      console.debug("[vscode.postMessage - dev shim]", msg);
+      // Also emit a message event so code listening to window.message can react.
+      try {
+        window.dispatchEvent(new MessageEvent("message", { data: msg }));
+      } catch {
+        // ignore
+      }
+    },
+    getState: <T = unknown>() => __vscode_state as T | undefined,
+    setState: (s: unknown) => {
+      __vscode_state = s;
+    },
+  };
 }
 
 export function isExtToWebviewMessage(x: unknown): x is ExtToWebviewMessage {
