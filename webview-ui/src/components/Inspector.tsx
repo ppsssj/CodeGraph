@@ -1,6 +1,6 @@
 import "./../App.css";
 import { Settings } from "lucide-react";
-import type { ExtToWebviewMessage } from "../lib/vscode";
+import type { ExtToWebviewMessage, GraphNode } from "../lib/vscode";
 import { ActiveFileSnapshot } from "./ActiveFileSnapshot";
 import { AnalysisPanel } from "./AnalysisPanel";
 
@@ -21,13 +21,26 @@ type Props = {
   activeFile: ActiveFilePayload;
   selection: SelectionPayload;
   analysis: AnalysisPayload;
+  selectedNode: GraphNode | null;
   onRefreshActive: () => void;
 };
+
+function shortFile(p: string) {
+  const parts = p.split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+function fmtRange(n: GraphNode) {
+  const s = n.range.start;
+  const e = n.range.end;
+  return `${s.line + 1}:${s.character + 1} → ${e.line + 1}:${e.character + 1}`;
+}
 
 export function Inspector({
   activeFile,
   selection,
   analysis,
+  selectedNode,
   onRefreshActive,
 }: Props) {
   return (
@@ -50,6 +63,51 @@ export function Inspector({
             text={activeFile?.text}
             onRefresh={onRefreshActive}
           />
+
+          {/* ✅ Selected node details (P0) */}
+          <div className="panel">
+            <div className="panelHeader">
+              <span>SELECTED NODE</span>
+            </div>
+            <div className="panelBody" style={{ gap: 10 }}>
+              {!selectedNode ? (
+                <div className="mutedText">
+                  No node selected. Click a node in the graph.
+                </div>
+              ) : (
+                <>
+                  <div className="kvList">
+                    <div className="kvRow">
+                      <div className="kvKey mono">kind</div>
+                      <div className="kvVal mono">{selectedNode.kind}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">name</div>
+                      <div className="kvVal mono">{selectedNode.name}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">file</div>
+                      <div className="kvVal mono">
+                        {shortFile(selectedNode.file)}
+                      </div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">range</div>
+                      <div className="kvVal mono">{fmtRange(selectedNode)}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">signature</div>
+                      <div className="kvVal mono">
+                        {selectedNode.signature?.trim()
+                          ? selectedNode.signature
+                          : "(none)"}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
 
           <div className="panel">
             <div className="panelHeader">

@@ -1,5 +1,5 @@
 import "./../App.css";
-import { ArrowDownLeft, ArrowUpRight, Sigma } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Sigma, Network } from "lucide-react";
 import type { ExtToWebviewMessage } from "../lib/vscode";
 
 type AnalysisPayload = Extract<
@@ -48,6 +48,9 @@ export function AnalysisPanel({ analysis }: Props) {
     );
   }
 
+  const nodesLen = analysis.graph?.nodes?.length ?? 0;
+  const edgesLen = analysis.graph?.edges?.length ?? 0;
+
   return (
     <div className="panel">
       <div className="panelHeader">
@@ -58,6 +61,29 @@ export function AnalysisPanel({ analysis }: Props) {
       </div>
 
       <div className="panelBody" style={{ gap: 14 }}>
+        {/* Graph */}
+        <Section
+          title={`Graph (${nodesLen} nodes · ${edgesLen} edges)`}
+          icon={<Network className="icon" />}
+        >
+          {analysis.graph ? (
+            <div className="kvList">
+              <div className="kvRow">
+                <div className="kvKey mono">nodes</div>
+                <div className="kvVal mono">{nodesLen}</div>
+              </div>
+              <div className="kvRow">
+                <div className="kvKey mono">edges</div>
+                <div className="kvVal mono">{edgesLen}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="mutedText">
+              No graph payload found in analysisResult.
+            </div>
+          )}
+        </Section>
+
         {/* Imports */}
         <Section
           title={`Imports (${analysis.imports.length})`}
@@ -114,13 +140,11 @@ export function AnalysisPanel({ analysis }: Props) {
               {analysis.calls.slice(0, 20).map((c, idx) => {
                 const rawLabel = isCallV2(c) ? c.calleeName : c.name;
 
-                // ⚠️ 라벨이 비어도 "(unknown)"으로 강제
                 const safeLabel =
                   typeof rawLabel === "string" && rawLabel.trim().length > 0
                     ? rawLabel
                     : "(unknown)";
 
-                // V2 메타
                 let meta: string | null = null;
                 if (isCallV2(c)) {
                   if (c.declFile && c.declRange) {
@@ -135,7 +159,6 @@ export function AnalysisPanel({ analysis }: Props) {
                   }
                 }
 
-                // ✅ key 안정화
                 const key = isCallV2(c)
                   ? `${safeLabel}-${c.declFile ?? "null"}-${c.declRange?.start.line ?? "n"}-${idx}`
                   : `${safeLabel}-${idx}`;
@@ -150,8 +173,6 @@ export function AnalysisPanel({ analysis }: Props) {
                       gap: 4,
                     }}
                   >
-                    {/* ✅ 여기서 기존 kvKey/kvVal 레이아웃을 버리고,
-                        라벨이 앞에서부터 보이도록 flex를 강제 */}
                     <div
                       style={{
                         display: "flex",
@@ -175,7 +196,6 @@ export function AnalysisPanel({ analysis }: Props) {
                       </span>
 
                       <span className="mono" style={{ opacity: 0.75 }}>
-                        {/* 괄호는 별도 출력(잘려도 라벨이 우선 보임) */}
                         ()
                       </span>
 

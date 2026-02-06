@@ -21,6 +21,32 @@ type AnalysisCallV2 = {
   isExternal: boolean;
 };
 
+type GraphNodeKind = "function" | "method" | "class" | "external";
+type GraphNode = {
+  id: string;
+  kind: GraphNodeKind;
+  name: string;
+  file: string;
+  range: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+  signature?: string;
+};
+
+type GraphEdgeKind = "calls" | "constructs";
+type GraphEdge = {
+  id: string;
+  kind: GraphEdgeKind;
+  source: string;
+  target: string;
+};
+
+type GraphPayload = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
 type ExtToWebviewMessage =
   | {
       type: "activeFile";
@@ -65,6 +91,9 @@ type ExtToWebviewMessage =
         }>;
         // ✅ V1/V2 모두 수용 (Webview 쪽에서 구버전 호환 처리)
         calls: Array<AnalysisCallV1 | AnalysisCallV2>;
+
+        // ✅ Graph payload (optional)
+        graph?: GraphPayload;
       } | null;
     };
 
@@ -107,12 +136,29 @@ export function activate(context: vscode.ExtensionContext) {
     postActiveFile(panel);
     postSelection(panel);
 
+    // ---- MVP: auto-analysis for active file changes (debounced) ----
+    let analysisTimer: NodeJS.Timeout | undefined;
+    const scheduleAnalysis = (delayMs: number) => {
+      if (analysisTimer) clearTimeout(analysisTimer);
+      analysisTimer = setTimeout(
+        () => {
+          try {
+            postAnalysis(panel);
+          } catch (e) {
+            console.error("[codegraph] auto-analysis error:", e);
+          }
+        },
+        Math.max(0, delayMs),
+      );
+    };
+
     const subActive = vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (editor) {
         lastTextEditor = editor;
         lastSelection = editor.selection;
       }
       postActiveFile(panel);
+      scheduleAnalysis(0);
     });
 
     const subChange = vscode.workspace.onDidChangeTextDocument((e) => {
@@ -121,6 +167,17 @@ export function activate(context: vscode.ExtensionContext) {
       if (!active) return;
       if (e.document.uri.toString() !== active.uri.toString()) return;
       postActiveFile(panel);
+
+      // ✅ MVP: incremental-ish update (debounced)
+      scheduleAnalysis(350);
+    });
+
+    const subSave = vscode.workspace.onDidSaveTextDocument((doc) => {
+      const active =
+        lastTextEditor?.document ?? vscode.window.activeTextEditor?.document;
+      if (!active) return;
+      if (doc.uri.toString() !== active.uri.toString()) return;
+      scheduleAnalysis(0);
     });
 
     const subSelection = vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -132,6 +189,7 @@ export function activate(context: vscode.ExtensionContext) {
     panel.onDidDispose(() => {
       subActive.dispose();
       subChange.dispose();
+      subSave.dispose();
       subSelection.dispose();
     });
   });
@@ -220,6 +278,7 @@ function postAnalysis(panel: vscode.WebviewPanel) {
     imports: result.imports,
     exports: result.exports,
     calls: result.calls, // ✅ V2로 생성(하지만 UI는 V1도 호환)
+    graph: result.graph,
   };
   console.log("[analysis.calls sample]", result.calls.slice(0, 6));
 
@@ -233,6 +292,7 @@ function postAnalysis(panel: vscode.WebviewPanel) {
  * AST + TypeChecker 기반 분석:
  * - imports/exports 정확 추출
  * - calls는 정규화 + 정의 위치(파일/Range)까지 resolve
+ * - graph는 active file의 함수/클래스/메서드 + calls/new edges 생성
  */
 function analyzeTypeScriptWithTypes(args: {
   code: string;
@@ -249,6 +309,7 @@ function analyzeTypeScriptWithTypes(args: {
     kind: "function" | "class" | "type" | "interface" | "const" | "unknown";
   }>;
   calls: Array<AnalysisCallV2>;
+  graph: GraphPayload;
 } {
   const { code, fileName, languageId } = args;
 
@@ -301,14 +362,20 @@ function analyzeTypeScriptWithTypes(args: {
   const sf = program.getSourceFile(inMemoryFileName);
 
   if (!sf) {
-    return { imports: [], exports: [], calls: [] };
+    return {
+      imports: [],
+      exports: [],
+      calls: [],
+      graph: { nodes: [], edges: [] },
+    };
   }
 
   const imports = extractImports(sf);
   const exports = extractExports(sf);
   const calls = extractCallsResolved(sf, checker);
+  const graph = buildActiveFileGraph(sf, checker);
 
-  return { imports, exports, calls };
+  return { imports, exports, calls, graph };
 }
 
 function pickScriptKind(fileName: string, languageId: string): ts.ScriptKind {
@@ -462,6 +529,175 @@ function extractExports(sf: ts.SourceFile): Array<{
   }
 
   return exports;
+}
+
+/**
+ * MVP graph builder: active-file only
+ * - Nodes: function/class/method (named only)
+ * - Edges: calls/new constructs (within active file only)
+ */
+function buildActiveFileGraph(
+  sf: ts.SourceFile,
+  checker: ts.TypeChecker,
+): GraphPayload {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  // declStartPos -> nodeId
+  const idByDeclPos = new Map<number, string>();
+
+  const mkId = (kind: GraphNodeKind, name: string, pos: number) =>
+    `${kind}:${name}@${pos}`;
+
+  const pushNode = (
+    decl: ts.Declaration,
+    kind: GraphNodeKind,
+    name: string,
+  ) => {
+    const loc = declLocation(decl);
+    const id = mkId(kind, name, loc.pos);
+    idByDeclPos.set(loc.pos, id);
+
+    let signature: string | undefined = undefined;
+    try {
+      if (
+        ts.isFunctionDeclaration(decl) ||
+        ts.isMethodDeclaration(decl) ||
+        ts.isConstructorDeclaration(decl)
+      ) {
+        const sig = checker.getSignatureFromDeclaration(
+          decl as ts.SignatureDeclaration,
+        );
+        if (sig) signature = checker.signatureToString(sig);
+      }
+    } catch {
+      // ignore signature extraction failures
+    }
+
+    nodes.push({
+      id,
+      kind,
+      name,
+      file: sf.fileName,
+      range: loc.range,
+      signature,
+    });
+  };
+
+  // 1) collect nodes (top-level + class members)
+  const visitDecls = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      pushNode(node, "function", node.name.text);
+    } else if (ts.isClassDeclaration(node) && node.name) {
+      pushNode(node, "class", node.name.text);
+      for (const m of node.members) {
+        if (
+          ts.isMethodDeclaration(m) &&
+          m.name &&
+          ts.isIdentifier(m.name) &&
+          m.body
+        ) {
+          pushNode(m, "method", `${node.name!.text}.${m.name.text}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visitDecls);
+  };
+
+  visitDecls(sf);
+
+  // helper: resolve call/new target decl pos in this file
+  const resolveTargetDeclPos = (
+    expr: ts.Expression,
+    kind: GraphEdgeKind,
+  ): number | null => {
+    try {
+      if (kind === "calls") {
+        const callExpr = expr.parent;
+        if (!ts.isCallExpression(callExpr)) return null;
+        const sig = checker.getResolvedSignature(callExpr);
+        const declFromSig = sig?.getDeclaration();
+        const sym = checker.getSymbolAtLocation(callExpr.expression);
+        const declFromSym = sym ? pickBestDeclaration(sym, checker) : undefined;
+        const decl = (declFromSig ?? declFromSym) as ts.Declaration | undefined;
+        if (!decl) return null;
+        const loc = declLocation(decl);
+        if (loc.fileName !== sf.fileName) return null;
+        return loc.pos;
+      }
+
+      // constructs
+      const newExpr = expr.parent;
+      if (!ts.isNewExpression(newExpr)) return null;
+      const t = checker.getTypeAtLocation(newExpr.expression);
+      const declFromSig = t.getConstructSignatures()[0]?.getDeclaration();
+      const sym = checker.getSymbolAtLocation(newExpr.expression);
+      const declFromSym = sym ? pickBestDeclaration(sym, checker) : undefined;
+      const decl = (declFromSig ?? declFromSym) as ts.Declaration | undefined;
+      if (!decl) return null;
+      const loc = declLocation(decl);
+      if (loc.fileName !== sf.fileName) return null;
+      return loc.pos;
+    } catch {
+      return null;
+    }
+  };
+
+  // 2) collect edges by walking bodies with owner tracking
+  const edgeKey = new Set<string>();
+  const addEdge = (edgeKind: GraphEdgeKind, srcId: string, tgtId: string) => {
+    const key = `${edgeKind}:${srcId}->${tgtId}`;
+    if (edgeKey.has(key)) return;
+    edgeKey.add(key);
+    edges.push({ id: key, kind: edgeKind, source: srcId, target: tgtId });
+  };
+
+  const walk = (node: ts.Node, ownerId: string | null) => {
+    // owner switches
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      const pos = node.getStart(sf, false);
+      const id = idByDeclPos.get(pos) ?? null;
+      const nextOwner = id ?? ownerId;
+      walk(node.body, nextOwner);
+      return;
+    }
+
+    if (
+      ts.isMethodDeclaration(node) &&
+      node.body &&
+      node.name &&
+      ts.isIdentifier(node.name)
+    ) {
+      const pos = node.getStart(sf, false);
+      const id = idByDeclPos.get(pos) ?? null;
+      const nextOwner = id ?? ownerId;
+      walk(node.body, nextOwner);
+      return;
+    }
+
+    // edge detection
+    if (ownerId && ts.isCallExpression(node)) {
+      const targetPos = resolveTargetDeclPos(node.expression, "calls");
+      if (targetPos != null) {
+        const tgtId = idByDeclPos.get(targetPos);
+        if (tgtId) addEdge("calls", ownerId, tgtId);
+      }
+    }
+
+    if (ownerId && ts.isNewExpression(node)) {
+      const targetPos = resolveTargetDeclPos(node.expression, "constructs");
+      if (targetPos != null) {
+        const tgtId = idByDeclPos.get(targetPos);
+        if (tgtId) addEdge("constructs", ownerId, tgtId);
+      }
+    }
+
+    ts.forEachChild(node, (c) => walk(c, ownerId));
+  };
+
+  walk(sf, null);
+
+  return { nodes, edges };
 }
 
 /** ✅ calls: 정규화 + declaration 위치 resolve */

@@ -331,10 +331,57 @@ body {
   min-height: 0;
 }
 
+/* ReactFlow root wrapper */
+.canvasFlow {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.canvasFlow .react-flow {
+  width: 100%;
+  height: 100%;
+}
+
+/* ReactFlow node visuals (custom node content) */
+.cgNode {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  padding: 10px 12px;
+  min-width: 160px;
+  color: var(--fg);
+}
+
+.cgNodeTitle {
+  font-size: 12px;
+  font-weight: 900;
+  color: #fff;
+}
+
+.cgNodeSub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1.2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgba(19, 91, 236, 0.85);
+}
+
+
 .canvasGrid {
   position: absolute;
   inset: 0;
   opacity: 0.14;
+  pointer-events: none;
+  z-index: 0;
   background-image: radial-gradient(var(--primary) 0.6px, transparent 0.6px);
   background-size: 20px 20px;
 }

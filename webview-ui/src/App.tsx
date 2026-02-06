@@ -7,6 +7,8 @@ import {
   getVSCodeApi,
   isExtToWebviewMessage,
   type ExtToWebviewMessage,
+  type GraphNode,
+  type GraphPayload,
 } from "./lib/vscode";
 
 const vscode = getVSCodeApi();
@@ -24,12 +26,20 @@ type AnalysisPayload = Extract<
   { type: "analysisResult" }
 >["payload"];
 
+function findNodeById(graph: GraphPayload | undefined, id: string | null) {
+  if (!graph || !id) return null;
+  return graph.nodes.find((n) => n.id === id) ?? null;
+}
+
 export default function App() {
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
   const [selection, setSelection] = useState<SelectionPayload>(null);
   const [analysis, setAnalysis] = useState<AnalysisPayload>(null);
 
   const [activeChip, setActiveChip] = useState<ChipKey>("functions");
+
+  // Selected graph node id (Inspector binding)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
@@ -49,12 +59,23 @@ export default function App() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
-  const hasData = Boolean(analysis);
+  const graph = analysis?.graph;
+  const hasGraphData = Boolean(graph && graph.nodes.length > 0);
 
-  const projectName = useMemo(() => {
-    if (activeFile?.fileName) return activeFile.fileName;
-    return "Active File";
-  }, [activeFile?.fileName]);
+  /**
+   * ✅ IMPORTANT:
+   * Do NOT "fix up" selectedNodeId inside an effect.
+   * Instead, derive selectedNode from (graph, selectedNodeId).
+   * If the node disappeared after auto-refresh, selectedNode becomes null and UI shows "No node selected".
+   */
+  const selectedNode: GraphNode | null = useMemo(() => {
+    return findNodeById(graph, selectedNodeId);
+  }, [graph, selectedNodeId]);
+
+  // Optional: computed value; avoid useMemo to satisfy React Compiler
+  const projectName = activeFile?.fileName
+    ? activeFile.fileName
+    : "Active File";
 
   return (
     <div className="appRoot">
@@ -71,10 +92,13 @@ export default function App() {
 
       <FiltersBar active={activeChip} onChange={setActiveChip} />
 
-      {/* ✅ App.css에 이미 정의된 가로 레이아웃 컨테이너 */}
       <div className="main">
         <CanvasPane
-          hasData={hasData}
+          hasData={hasGraphData}
+          graph={graph}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={(nodeId) => setSelectedNodeId(nodeId)}
+          onClearSelection={() => setSelectedNodeId(null)}
           onGenerateFromActive={() => {
             vscode.postMessage({ type: "analyzeActiveFile" });
           }}
@@ -87,6 +111,7 @@ export default function App() {
           activeFile={activeFile}
           selection={selection}
           analysis={analysis}
+          selectedNode={selectedNode}
           onRefreshActive={() => {
             vscode.postMessage({ type: "requestActiveFile" });
           }}

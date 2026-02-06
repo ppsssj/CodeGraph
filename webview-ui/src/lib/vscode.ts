@@ -20,6 +20,35 @@ export type CallV2 = {
 
 export type CallItem = CallV1 | CallV2;
 
+/** Graph (MVP: active file only) */
+export type Position = { line: number; character: number };
+export type Range = { start: Position; end: Position };
+
+export type GraphNodeKind = "function" | "method" | "class" | "external";
+
+export type GraphNode = {
+  id: string;
+  kind: GraphNodeKind;
+  name: string;
+  file: string;
+  range: Range;
+  signature?: string;
+};
+
+export type GraphEdgeKind = "calls" | "constructs";
+
+export type GraphEdge = {
+  id: string;
+  kind: GraphEdgeKind;
+  source: string;
+  target: string;
+};
+
+export type GraphPayload = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
 /** Extension -> Webview */
 export type ExtToWebviewMessage =
   | {
@@ -65,6 +94,9 @@ export type ExtToWebviewMessage =
         }>;
         // ✅ V1/V2 호환
         calls: CallItem[];
+
+        // ✅ Graph payload (optional to keep backward compatibility)
+        graph?: GraphPayload;
       } | null;
     };
 
@@ -92,10 +124,8 @@ export function getVSCodeApi(): VSCodeApi {
   let __vscode_state: unknown = undefined;
   return {
     postMessage: (msg: WebviewToExtMessage) => {
-      // Log for dev; consumers can still observe window "message" if needed.
       // eslint-disable-next-line no-console
       console.debug("[vscode.postMessage - dev shim]", msg);
-      // Also emit a message event so code listening to window.message can react.
       try {
         window.dispatchEvent(new MessageEvent("message", { data: msg }));
       } catch {
