@@ -40,13 +40,15 @@ export type GraphNode = {
   signature?: string;
 };
 
-export type GraphEdgeKind = "calls" | "constructs";
+export type GraphEdgeKind = "calls" | "constructs" | "dataflow";
 
 export type GraphEdge = {
   id: string;
   kind: GraphEdgeKind;
   source: string;
   target: string;
+  /** Optional label for edge (used by dataflow). */
+  label?: string;
 };
 
 export type GraphPayload = {

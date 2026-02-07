@@ -8,6 +8,10 @@ import ReactFlow, {
   MarkerType,
   Handle,
   Position,
+  EdgeLabelRenderer,
+  BaseEdge,
+  getSmoothStepPath,
+  type EdgeProps,
   type Edge,
   type Node,
   type ReactFlowInstance,
@@ -88,6 +92,51 @@ function CodeNode({
 }
 
 const nodeTypes = { code: CodeNode };
+type DataflowEdgeData = { label?: string };
+
+function DataflowEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  data,
+  style,
+}: EdgeProps<DataflowEdgeData>) {
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+
+  const label = typeof data?.label === "string" ? data.label : "";
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      {label ? (
+        <EdgeLabelRenderer>
+          <div
+            className="cgEdgeLabel cgEdgeLabel--dataflow"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  );
+}
+
+const edgeTypes = { dataflow: DataflowEdge };
 
 function toReactFlowNodes(graph?: GraphPayload): Node[] {
   if (!graph) return [];
@@ -109,19 +158,31 @@ function toReactFlowNodes(graph?: GraphPayload): Node[] {
 
 function toReactFlowEdges(graph?: GraphPayload): Edge[] {
   if (!graph) return [];
+
   return graph.edges.map((e) => {
-    const cls =
-      e.kind === "constructs"
-        ? "cgEdge cgEdge--constructs"
-        : "cgEdge cgEdge--calls";
+    const isDataflow = e.kind === "dataflow";
 
     return {
       id: e.id,
       source: e.source,
       target: e.target,
-      type: "smoothstep",
-      className: cls,
+      type: isDataflow ? "dataflow" : "smoothstep",
+      className:
+        e.kind === "constructs"
+          ? "cgEdge cgEdge--constructs"
+          : isDataflow
+            ? "cgEdge cgEdge--dataflow"
+            : "cgEdge cgEdge--calls",
+
       markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+
+      // ✅ Dataflow 라벨
+      data: isDataflow ? { label: e.label ?? "" } : undefined,
+
+      // ✅ Dataflow 점선/컬러는 BaseEdge가 style로 받음
+      style: isDataflow
+        ? { strokeDasharray: "6 4", stroke: "rgba(59, 130, 246, 0.85)" }
+        : undefined,
     } satisfies Edge;
   });
 }
@@ -204,6 +265,7 @@ function CanvasFlow({
         <div className="canvasFlow">
           <ReactFlow
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             nodes={rfNodes}
             edges={rfEdges}
             onInit={(inst) => {

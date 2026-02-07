@@ -34,12 +34,13 @@ type GraphNode = {
   signature?: string;
 };
 
-type GraphEdgeKind = "calls" | "constructs";
+type GraphEdgeKind = "calls" | "constructs" | "dataflow";
 type GraphEdge = {
   id: string;
   kind: GraphEdgeKind;
   source: string;
   target: string;
+  label?: string;
 };
 
 type GraphPayload = {
@@ -537,7 +538,6 @@ function extractExports(sf: ts.SourceFile): Array<{
 
   return exports;
 }
-
 /**
  * MVP graph builder: active-file only
  * - Nodes: file/function/class/method (named only)
@@ -673,11 +673,68 @@ function buildActiveFileGraph(
 
   // 2) collect edges by walking bodies with owner tracking
   const edgeKey = new Set<string>();
-  const addEdge = (edgeKind: GraphEdgeKind, srcId: string, tgtId: string) => {
-    const key = `${edgeKind}:${srcId}->${tgtId}`;
+  const addEdge = (
+    edgeKind: GraphEdgeKind,
+    srcId: string,
+    tgtId: string,
+    label?: string,
+  ) => {
+    const key = `${edgeKind}:${srcId}->${tgtId}@@${label ?? ""}`;
     if (edgeKey.has(key)) return;
     edgeKey.add(key);
-    edges.push({ id: key, kind: edgeKind, source: srcId, target: tgtId });
+    edges.push({
+      id: key,
+      kind: edgeKind,
+      source: srcId,
+      target: tgtId,
+      label,
+    });
+  };
+
+  const clampText = (s: string, max = 80) =>
+    s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+
+  const buildDataflowLabel = (
+    paramName: string,
+    arg: ts.Expression,
+  ): string => {
+    const argText = clampText(arg.getText(sf).replace(/\s+/g, " "), 80);
+
+    let typeStr = "";
+    try {
+      const t = checker.getTypeAtLocation(arg);
+      typeStr = checker.typeToString(t);
+    } catch {
+      typeStr = "";
+    }
+
+    if (typeStr) {
+      // "paramName: type" or "paramName ← argText" 형태를 유지하면서 둘 다 담는다.
+      return `${paramName} ← ${argText}: ${typeStr}`;
+    }
+    return `${paramName} ← ${argText}`;
+  };
+
+  const addDataflowEdgesFromSignature = (
+    ownerId: string,
+    targetId: string,
+    sigDecl: ts.SignatureDeclaration | undefined,
+    callArgs: readonly ts.Expression[] | undefined,
+  ) => {
+    if (!sigDecl) return;
+    const params = sigDecl.parameters ?? ts.factory.createNodeArray();
+    const args = callArgs ?? [];
+
+    const n = Math.min(params.length, args.length);
+    for (let i = 0; i < n; i++) {
+      const p = params[i];
+      const a = args[i];
+      if (!p || !a) continue;
+
+      const paramName = clampText(p.name.getText(sf).replace(/\s+/g, " "), 60);
+      const label = buildDataflowLabel(paramName, a);
+      addEdge("dataflow", ownerId, targetId, label);
+    }
   };
 
   const walk = (node: ts.Node, ownerId: string) => {
@@ -708,7 +765,21 @@ function buildActiveFileGraph(
       const targetPos = resolveTargetDeclPos(node.expression, "calls");
       if (targetPos != null) {
         const tgtId = idByDeclPos.get(targetPos);
-        if (tgtId) addEdge("calls", ownerId, tgtId);
+        if (tgtId) {
+          addEdge("calls", ownerId, tgtId);
+
+          // ✅ dataflow: param <- arg (with best-effort type)
+          const sig = checker.getResolvedSignature(node);
+          const sigDecl = sig?.getDeclaration() as
+            | ts.SignatureDeclaration
+            | undefined;
+          addDataflowEdgesFromSignature(
+            ownerId,
+            tgtId,
+            sigDecl,
+            node.arguments,
+          );
+        }
       }
     }
 
@@ -716,7 +787,26 @@ function buildActiveFileGraph(
       const targetPos = resolveTargetDeclPos(node.expression, "constructs");
       if (targetPos != null) {
         const tgtId = idByDeclPos.get(targetPos);
-        if (tgtId) addEdge("constructs", ownerId, tgtId);
+        if (tgtId) {
+          addEdge("constructs", ownerId, tgtId);
+
+          // ✅ dataflow for constructor args
+          let sigDecl: ts.SignatureDeclaration | undefined = undefined;
+          try {
+            const t = checker.getTypeAtLocation(node.expression);
+            sigDecl = t.getConstructSignatures()[0]?.getDeclaration() as
+              | ts.SignatureDeclaration
+              | undefined;
+          } catch {
+            sigDecl = undefined;
+          }
+          addDataflowEdgesFromSignature(
+            ownerId,
+            tgtId,
+            sigDecl,
+            node.arguments,
+          );
+        }
       }
     }
 
@@ -770,7 +860,6 @@ function extractCallsResolved(
     .sort((a, b) => b.count - a.count)
     .slice(0, 60);
 }
-
 function resolveCallToDeclaration(
   call: ts.CallExpression,
   sf: ts.SourceFile,
