@@ -34,7 +34,7 @@ export class Counter {
 // 간단 실행
 const u: User = { id: 1, name: "CodeGraph" };
 console.log(greet(u));
-console.log("add:", add(2, 3));
+console.log("add:", add(1, 6));
 
 const c = new Counter();
 console.log("counter:", c.inc(), c.inc(2), c.dec());

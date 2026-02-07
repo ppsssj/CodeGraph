@@ -672,20 +672,19 @@ function buildActiveFileGraph(
   };
 
   // 2) collect edges by walking bodies with owner tracking
-  // (REPLACE) 기존 addEdge 블록 전체를 아래로 교체
   const edgeKey = new Set<string>();
   const addEdge = (
     edgeKind: GraphEdgeKind,
     srcId: string,
     tgtId: string,
     label?: string,
-    dedupeHint?: string, // ✅ dataflow 인자 index 등 추가 식별자
+    dedupeHint?: string, // ✅ dataflow 인자 index 등 식별자
   ) => {
     const key = `${edgeKind}:${srcId}->${tgtId}@@${label ?? ""}@@${dedupeHint ?? ""}`;
     if (edgeKey.has(key)) return;
     edgeKey.add(key);
     edges.push({
-      id: key,
+      id: key, // ✅ ReactFlow id도 키를 그대로 사용 → 충돌 방지
       kind: edgeKind,
       source: srcId,
       target: tgtId,
@@ -696,26 +695,22 @@ function buildActiveFileGraph(
   const clampText = (s: string, max = 80) =>
     s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 
-  // (REPLACE) 기존 buildDataflowLabel 블록 전체를 아래로 교체
+  // REPLACE: 기존 buildDataflowLabel 블록 전체
   const buildDataflowLabel = (
-    param: ts.ParameterDeclaration,
+    p: ts.ParameterDeclaration,
     arg: ts.Expression,
-  ): string => {
-    const paramName = clampText(
-      param.name.getText(sf).replace(/\s+/g, " "),
-      60,
-    );
+  ) => {
+    const paramName = clampText(p.name.getText(sf).replace(/\s+/g, " "), 60);
     const argText = clampText(arg.getText(sf).replace(/\s+/g, " "), 80);
 
     let paramTypeStr = "";
     try {
-      // 타입 표기가 있으면 그걸 우선 활용하고, 없으면 checker로 추론
-      if (param.type) {
+      if (p.type) {
         paramTypeStr = checker.typeToString(
-          checker.getTypeFromTypeNode(param.type),
+          checker.getTypeFromTypeNode(p.type),
         );
       } else {
-        paramTypeStr = checker.typeToString(checker.getTypeAtLocation(param));
+        paramTypeStr = checker.typeToString(checker.getTypeAtLocation(p));
       }
     } catch {
       paramTypeStr = "";
@@ -731,7 +726,6 @@ function buildActiveFileGraph(
     const left = paramTypeStr ? `${paramName}: ${paramTypeStr}` : paramName;
     const right = argTypeStr ? `${argText}: ${argTypeStr}` : argText;
 
-    // 기본 포맷: "paramName ← argText" (+type best-effort)
     return `${left} ← ${right}`;
   };
 
@@ -751,8 +745,8 @@ function buildActiveFileGraph(
       const a = args[i];
       if (!p || !a) continue;
 
-      const paramName = clampText(p.name.getText(sf).replace(/\s+/g, " "), 60);
       const label = buildDataflowLabel(p, a);
+      // ✅ dataflow는 인자별로 별도 edge가 필요 → arg index를 키에 포함
       addEdge("dataflow", ownerId, targetId, label, `arg#${i}`);
     }
   };
