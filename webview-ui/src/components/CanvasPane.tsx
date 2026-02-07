@@ -180,9 +180,9 @@ function toReactFlowEdges(graph?: GraphPayload): Edge[] {
       data: isDataflow ? { label: e.label ?? "" } : undefined,
 
       // ✅ Dataflow 점선/컬러는 BaseEdge가 style로 받음
-      style: isDataflow
-        ? { strokeDasharray: "6 4", stroke: "rgba(59, 130, 246, 0.85)" }
-        : undefined,
+      // style: isDataflow
+      //   ? { strokeDasharray: "6 4", stroke: "rgba(59, 130, 246, 0.85)" }
+      //   : undefined,
     } satisfies Edge;
   });
 }
