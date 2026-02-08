@@ -117,6 +117,11 @@ function DataflowEdge({
 
   const label = typeof data?.label === "string" ? data.label : "";
 
+  // ✅ 라벨 겹침 방지: extension에서 id에 넣은 "@@arg#i"를 파싱해 y-offset 적용
+  const m = String(id).match(/@@arg#(\d+)/);
+  const argIndex = m ? Number(m[1]) : 0;
+  const yOffset = argIndex * 26; // 14px 간격 (필요시 10~18로 조정)
+
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
@@ -125,7 +130,9 @@ function DataflowEdge({
           <div
             className="cgEdgeLabel cgEdgeLabel--dataflow"
             style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${
+                labelY + yOffset
+              }px)`,
             }}
           >
             {label}
