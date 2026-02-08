@@ -32,10 +32,36 @@ function findNodeById(graph: GraphPayload | undefined, id: string | null) {
   return graph.nodes.find((n) => n.id === id) ?? null;
 }
 
+function mergeGraph(
+  prev: GraphPayload | undefined,
+  next: GraphPayload | undefined,
+): GraphPayload | undefined {
+  if (!next) return prev;
+  if (!prev) return next;
+
+  const nodeById = new Map(prev.nodes.map((n) => [n.id, n]));
+  for (const n of next.nodes) nodeById.set(n.id, n);
+
+  const edgeById = new Map(prev.edges.map((e) => [e.id, e]));
+  for (const e of next.edges) edgeById.set(e.id, e);
+
+  return { nodes: [...nodeById.values()], edges: [...edgeById.values()] };
+}
+
 export default function App() {
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
   const [selection, setSelection] = useState<SelectionPayload>(null);
   const [analysis, setAnalysis] = useState<AnalysisPayload>(null);
+
+  // Graph is merged over time (external expansions)
+  const [graphState, setGraphState] = useState<GraphPayload | undefined>(
+    undefined,
+  );
+
+  // Avoid re-expanding the same external file repeatedly
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const [activeChip, setActiveChip] = useState<ChipKey>("functions");
 
@@ -49,7 +75,15 @@ export default function App() {
       const msg = event.data;
       if (msg.type === "activeFile") setActiveFile(msg.payload);
       if (msg.type === "selection") setSelection(msg.payload);
-      if (msg.type === "analysisResult") setAnalysis(msg.payload);
+      if (msg.type === "analysisResult") {
+        setAnalysis(msg.payload);
+        const g = msg.payload?.graph;
+        if (g) setGraphState((prev) => mergeGraph(prev, g));
+        if (!msg.payload) {
+          setGraphState(undefined);
+          setExpandedFiles(new Set());
+        }
+      }
     };
 
     window.addEventListener("message", onMessage);
@@ -60,23 +94,35 @@ export default function App() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
-  const graph = analysis?.graph;
+  const graph = graphState;
   const hasGraphData = Boolean(graph && graph.nodes.length > 0);
 
-  /**
-   * ✅ IMPORTANT:
-   * Do NOT "fix up" selectedNodeId inside an effect.
-   * Instead, derive selectedNode from (graph, selectedNodeId).
-   * If the node disappeared after auto-refresh, selectedNode becomes null and UI shows "No node selected".
-   */
   const selectedNode: GraphNode | null = useMemo(() => {
     return findNodeById(graph, selectedNodeId);
   }, [graph, selectedNodeId]);
 
-  // Optional: computed value; avoid useMemo to satisfy React Compiler
   const projectName = activeFile?.fileName
     ? activeFile.fileName
     : "Active File";
+
+  const resetGraph = () => {
+    setGraphState(undefined);
+    setExpandedFiles(new Set());
+    setSelectedNodeId(null);
+  };
+
+  const expandExternalFile = (filePath: string) => {
+    if (!filePath) return;
+    if (expandedFiles.has(filePath)) return;
+
+    setExpandedFiles((prev) => {
+      const next = new Set(prev);
+      next.add(filePath);
+      return next;
+    });
+
+    vscode.postMessage({ type: "expandNode", filePath });
+  };
 
   return (
     <div className="appRoot">
@@ -87,6 +133,7 @@ export default function App() {
           vscode.postMessage({ type: "requestSelection" });
         }}
         onGenerate={() => {
+          resetGraph();
           vscode.postMessage({ type: "analyzeActiveFile" });
         }}
       />
@@ -106,6 +153,7 @@ export default function App() {
           onUseSelectionAsRoot={() => {
             vscode.postMessage({ type: "requestSelection" });
           }}
+          onExpandExternal={(filePath) => expandExternalFile(filePath)}
         />
 
         <Inspector
@@ -116,6 +164,8 @@ export default function App() {
           onRefreshActive={() => {
             vscode.postMessage({ type: "requestActiveFile" });
           }}
+          onResetGraph={resetGraph}
+          onExpandExternal={(filePath) => expandExternalFile(filePath)}
         />
       </div>
     </div>

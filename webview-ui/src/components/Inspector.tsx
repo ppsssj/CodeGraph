@@ -23,6 +23,8 @@ type Props = {
   analysis: AnalysisPayload;
   selectedNode: GraphNode | null;
   onRefreshActive: () => void;
+  onResetGraph: () => void;
+  onExpandExternal: (filePath: string) => void;
 };
 
 function shortFile(p: string) {
@@ -42,6 +44,8 @@ export function Inspector({
   analysis,
   selectedNode,
   onRefreshActive,
+  onResetGraph,
+  onExpandExternal,
 }: Props) {
   return (
     <aside className="inspector">
@@ -53,6 +57,25 @@ export function Inspector({
         <button className="iconBtn subtle" type="button" title="Settings">
           <Settings className="icon" />
         </button>
+      </div>
+
+      <div className="inspectorActions">
+        <button className="smallBtn" type="button" onClick={onRefreshActive}>
+          Refresh Active
+        </button>
+        <button className="smallBtn" type="button" onClick={onResetGraph}>
+          Reset Graph
+        </button>
+        {selectedNode && selectedNode.kind === "external" ? (
+          <button
+            className="smallBtn"
+            type="button"
+            onClick={() => onExpandExternal(selectedNode.file)}
+            title={selectedNode.file}
+          >
+            Expand External
+          </button>
+        ) : null}
       </div>
 
       <div className="inspectorBody">

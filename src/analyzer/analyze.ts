@@ -1,5 +1,5 @@
-//src/analyzer/analyze.ts (TypeScript 코드 분석기)
 import * as path from "path";
+import * as fs from "fs";
 import * as ts from "typescript";
 import type {
   AnalysisCallV2,
@@ -10,6 +10,10 @@ import type {
   GraphPayload,
 } from "../shared/protocol";
 
+/**
+ * Single-file analysis (in-memory program with only the active file as root).
+ * Keeps behavior stable for MVP / fallback.
+ */
 export function analyzeTypeScriptWithTypes(args: {
   code: string;
   fileName: string;
@@ -26,6 +30,7 @@ export function analyzeTypeScriptWithTypes(args: {
   }>;
   calls: Array<AnalysisCallV2>;
   graph: GraphPayload;
+  meta: { mode: "single-file" };
 } {
   const { code, fileName, languageId } = args;
 
@@ -83,15 +88,212 @@ export function analyzeTypeScriptWithTypes(args: {
       exports: [],
       calls: [],
       graph: { nodes: [], edges: [] },
+      meta: { mode: "single-file" },
     };
   }
 
   const imports = extractImports(sf);
   const exports = extractExports(sf);
   const calls = extractCallsResolved(sf, checker);
+
+  // single-file graph: external nodes still possible (but likely null since program has one file)
   const graph = buildActiveFileGraph(sf, checker);
 
-  return { imports, exports, calls, graph };
+  return { imports, exports, calls, graph, meta: { mode: "single-file" } };
+}
+
+/**
+ * Workspace-aware analysis. Builds a multi-file Program so declarations can resolve across files.
+ * - Uses tsconfig.json in workspaceRoot if present (preferred)
+ * - Otherwise uses filePaths as program roots (fallback)
+ * - Always overrides active file source with in-memory code (so unsaved edits are included)
+ */
+export function analyzeWithWorkspace(args: {
+  active: { code: string; fileName: string; languageId: string };
+  workspaceRoot: string | null;
+  filePaths: string[];
+}): {
+  imports: Array<{
+    source: string;
+    specifiers: string[];
+    kind: "named" | "default" | "namespace" | "side-effect" | "unknown";
+  }>;
+  exports: Array<{
+    name: string;
+    kind: "function" | "class" | "type" | "interface" | "const" | "unknown";
+  }>;
+  calls: Array<AnalysisCallV2>;
+  graph: GraphPayload;
+  meta: {
+    mode: "workspace";
+    rootFiles: number;
+    usedTsconfig: boolean;
+    projectRoot?: string;
+  };
+} {
+  const { active, workspaceRoot, filePaths } = args;
+  const activeFile = active.fileName;
+
+  // no workspace: fall back to single-file behavior
+  if (!workspaceRoot) {
+    const r = analyzeTypeScriptWithTypes({
+      code: active.code,
+      fileName: active.fileName,
+      languageId: active.languageId,
+    });
+    return {
+      ...r,
+      meta: { mode: "workspace", rootFiles: 1, usedTsconfig: false },
+    };
+  }
+
+  const { rootNames, options, usedTsconfig, projectRoot } = buildWorkspaceRoots(
+    {
+      workspaceRoot,
+      filePaths,
+    },
+  );
+
+  const scriptKind = pickScriptKind(active.fileName, active.languageId);
+
+  const defaultHost = ts.createCompilerHost(options, true);
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    fileExists: (fileName) => {
+      if (samePath(fileName, activeFile)) return true;
+      return defaultHost.fileExists(fileName);
+    },
+    readFile: (fileName) => {
+      if (samePath(fileName, activeFile)) return active.code;
+      return defaultHost.readFile(fileName);
+    },
+    getSourceFile: (
+      requested,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    ) => {
+      if (samePath(requested, activeFile)) {
+        return ts.createSourceFile(
+          requested,
+          active.code,
+          languageVersion,
+          true,
+          scriptKind,
+        );
+      }
+      return defaultHost.getSourceFile(
+        requested,
+        languageVersion,
+        onError,
+        shouldCreateNewSourceFile,
+      );
+    },
+  };
+
+  const program = ts.createProgram(rootNames, options, host);
+  const checker = program.getTypeChecker();
+  const sf = program.getSourceFile(activeFile);
+
+  if (!sf) {
+    // rare: if activeFile not in roots, still try single-file
+    const r = analyzeTypeScriptWithTypes({
+      code: active.code,
+      fileName: active.fileName,
+      languageId: active.languageId,
+    });
+    return {
+      ...r,
+      meta: {
+        mode: "workspace",
+        rootFiles: rootNames.length,
+        usedTsconfig,
+        projectRoot,
+      },
+    };
+  }
+
+  const imports = extractImports(sf);
+  const exports = extractExports(sf);
+  const calls = extractCallsResolved(sf, checker);
+
+  // workspace graph (external nodes enabled)
+  const graph = buildActiveFileGraph(sf, checker);
+
+  return {
+    imports,
+    exports,
+    calls,
+    graph,
+    meta: {
+      mode: "workspace",
+      rootFiles: rootNames.length,
+      usedTsconfig,
+      projectRoot,
+    },
+  };
+}
+
+function buildWorkspaceRoots(args: {
+  workspaceRoot: string;
+  filePaths: string[];
+}): {
+  rootNames: string[];
+  options: ts.CompilerOptions;
+  usedTsconfig: boolean;
+  projectRoot?: string;
+} {
+  const { workspaceRoot, filePaths } = args;
+
+  const tsconfigPath = path.join(workspaceRoot, "tsconfig.json");
+  if (fs.existsSync(tsconfigPath)) {
+    try {
+      const cfg = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+      const parsed = ts.parseJsonConfigFileContent(
+        cfg.config,
+        ts.sys,
+        workspaceRoot,
+      );
+      const rootNames = parsed.fileNames.length ? parsed.fileNames : filePaths;
+      const options: ts.CompilerOptions = {
+        ...parsed.options,
+        noEmit: true,
+        skipLibCheck: parsed.options.skipLibCheck ?? true,
+      };
+      return {
+        rootNames,
+        options,
+        usedTsconfig: true,
+        projectRoot: workspaceRoot,
+      };
+    } catch {
+      // fallback
+    }
+  }
+
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.CommonJS,
+    moduleResolution: ts.ModuleResolutionKind.NodeJs,
+    jsx: ts.JsxEmit.React,
+    allowJs: true,
+    checkJs: false,
+    esModuleInterop: true,
+    skipLibCheck: true,
+    noEmit: true,
+    strict: false,
+  };
+
+  return {
+    rootNames: filePaths,
+    options,
+    usedTsconfig: false,
+    projectRoot: workspaceRoot,
+  };
+}
+
+function samePath(a: string, b: string) {
+  return path.resolve(a) === path.resolve(b);
 }
 
 function pickScriptKind(fileName: string, languageId: string): ts.ScriptKind {
@@ -248,9 +450,10 @@ function extractExports(sf: ts.SourceFile): Array<{
 }
 
 /**
- * MVP graph builder: active-file only
- * - Nodes: file/function/class/method (named only)
- * - Edges: calls/new constructs (incl. top-level via file node)
+ * Graph builder (active-file centered)
+ * - Always includes file node + local decl nodes
+ * - If a call/new resolves to a declaration in another file:
+ *   - create an `external` node, and connect edges to it
  */
 function buildActiveFileGraph(
   sf: ts.SourceFile,
@@ -259,11 +462,11 @@ function buildActiveFileGraph(
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
-  // declStartPos -> nodeId
+  // declStartPos -> nodeId (only for active file decls)
   const idByDeclPos = new Map<number, string>();
 
-  const mkId = (kind: GraphNodeKind, name: string, pos: number) =>
-    `${kind}:${name}@${pos}`;
+  const mkId = (kind: GraphNodeKind, name: string, file: string, pos: number) =>
+    `${kind}:${name}@${file}:${pos}`;
 
   const sourceFileRange = () => {
     const endPos = sf.getEnd();
@@ -274,10 +477,10 @@ function buildActiveFileGraph(
     };
   };
 
-  // ✅ 0) file/module root node (top-level owner)
+  // file root node (top-level owner)
   const filePos = 0;
   const fileNameBase = path.basename(sf.fileName);
-  const fileNodeId = mkId("file", fileNameBase, filePos);
+  const fileNodeId = mkId("file", fileNameBase, sf.fileName, filePos);
   nodes.push({
     id: fileNodeId,
     kind: "file",
@@ -292,7 +495,7 @@ function buildActiveFileGraph(
     name: string,
   ) => {
     const loc = declLocation(decl);
-    const id = mkId(kind, name, loc.pos);
+    const id = mkId(kind, name, loc.fileName, loc.pos);
     idByDeclPos.set(loc.pos, id);
 
     let signature: string | undefined = undefined;
@@ -321,7 +524,7 @@ function buildActiveFileGraph(
     });
   };
 
-  // 1) collect nodes (top-level + class members)
+  // collect nodes (top-level + class members)
   const visitDecls = (node: ts.Node) => {
     if (ts.isFunctionDeclaration(node) && node.name && node.body) {
       pushNode(node, "function", node.name.text);
@@ -340,60 +543,51 @@ function buildActiveFileGraph(
     }
     ts.forEachChild(node, visitDecls);
   };
-
   visitDecls(sf);
 
-  // helper: resolve call/new target decl pos in this file
-  const resolveTargetDeclPos = (
-    expr: ts.Expression,
-    kind: GraphEdgeKind,
-  ): number | null => {
-    try {
-      if (kind === "calls") {
-        const callExpr = expr.parent;
-        if (!ts.isCallExpression(callExpr)) return null;
-        const sig = checker.getResolvedSignature(callExpr);
-        const declFromSig = sig?.getDeclaration();
-        const sym = checker.getSymbolAtLocation(callExpr.expression);
-        const declFromSym = sym ? pickBestDeclaration(sym, checker) : undefined;
-        const decl = (declFromSig ?? declFromSym) as ts.Declaration | undefined;
-        if (!decl) return null;
-        const loc = declLocation(decl);
-        if (loc.fileName !== sf.fileName) return null;
-        return loc.pos;
-      }
+  // external node cache (by decl file+pos)
+  const externalIdByDecl = new Map<string, string>();
 
-      // constructs
-      const newExpr = expr.parent;
-      if (!ts.isNewExpression(newExpr)) return null;
-      const t = checker.getTypeAtLocation(newExpr.expression);
-      const declFromSig = t.getConstructSignatures()[0]?.getDeclaration();
-      const sym = checker.getSymbolAtLocation(newExpr.expression);
-      const declFromSym = sym ? pickBestDeclaration(sym, checker) : undefined;
-      const decl = (declFromSig ?? declFromSym) as ts.Declaration | undefined;
-      if (!decl) return null;
-      const loc = declLocation(decl);
-      if (loc.fileName !== sf.fileName) return null;
-      return loc.pos;
-    } catch {
-      return null;
-    }
+  const ensureExternalNode = (
+    name: string,
+    loc: ReturnType<typeof declLocation>,
+    signature?: string,
+  ) => {
+    const key = `${loc.fileName}:${loc.pos}`;
+    const existing = externalIdByDecl.get(key);
+    if (existing) return existing;
+
+    const base = path.basename(loc.fileName);
+    const tag = isExternalFile(loc.fileName) ? " [lib]" : "";
+    const displayName = `${name} (${base})${tag}`;
+
+    const id = mkId("external", displayName, loc.fileName, loc.pos);
+    externalIdByDecl.set(key, id);
+    nodes.push({
+      id,
+      kind: "external",
+      name: displayName,
+      file: loc.fileName,
+      range: loc.range,
+      signature,
+    });
+    return id;
   };
 
-  // 2) collect edges by walking bodies with owner tracking
+  // edge helper
   const edgeKey = new Set<string>();
   const addEdge = (
     edgeKind: GraphEdgeKind,
     srcId: string,
     tgtId: string,
     label?: string,
-    dedupeHint?: string, // ✅ dataflow 인자 index 등 식별자
+    dedupeHint?: string,
   ) => {
     const key = `${edgeKind}:${srcId}->${tgtId}@@${label ?? ""}@@${dedupeHint ?? ""}`;
     if (edgeKey.has(key)) return;
     edgeKey.add(key);
     edges.push({
-      id: key, // ✅ ReactFlow id도 키를 그대로 사용 → 충돌 방지
+      id: key,
       kind: edgeKind,
       source: srcId,
       target: tgtId,
@@ -458,6 +652,89 @@ function buildActiveFileGraph(
     }
   };
 
+  const resolveCallTarget = (node: ts.CallExpression) => {
+    try {
+      const calleeName = normalizeCalleeName(node.expression, sf, checker);
+      const sig = checker.getResolvedSignature(node);
+      const declFromSig = sig?.getDeclaration();
+
+      const sym = checker.getSymbolAtLocation(node.expression);
+      const declFromSym = sym ? pickBestDeclaration(sym, checker) : undefined;
+
+      const decl = (declFromSig ?? declFromSym) as ts.Declaration | undefined;
+      if (!decl) return null;
+
+      const loc = declLocation(decl);
+
+      let signature: string | undefined = undefined;
+      try {
+        const sigDecl = sig?.getDeclaration() as
+          | ts.SignatureDeclaration
+          | undefined;
+        if (sigDecl) {
+          const s = checker.getSignatureFromDeclaration(sigDecl);
+          signature = s ? checker.signatureToString(s) : undefined;
+        }
+      } catch {}
+
+      if (loc.fileName === sf.fileName) {
+        const tgtId = idByDeclPos.get(loc.pos);
+        return tgtId
+          ? {
+              tgtId,
+              sigDecl: sig?.getDeclaration() as
+                | ts.SignatureDeclaration
+                | undefined,
+            }
+          : null;
+      }
+
+      const extId = ensureExternalNode(calleeName, loc, signature);
+      return {
+        tgtId: extId,
+        sigDecl: sig?.getDeclaration() as ts.SignatureDeclaration | undefined,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveNewTarget = (node: ts.NewExpression) => {
+    try {
+      const ctorExpr = node.expression;
+      const calleeName = `new ${normalizeCtorName(ctorExpr, sf, checker)}`;
+
+      const t = checker.getTypeAtLocation(ctorExpr);
+      const declFromSig = t.getConstructSignatures()[0]?.getDeclaration();
+
+      const sym = checker.getSymbolAtLocation(ctorExpr);
+      const declFromSym = sym ? pickBestDeclaration(sym, checker) : undefined;
+
+      const decl = (declFromSig ?? declFromSym) as ts.Declaration | undefined;
+      if (!decl) return null;
+
+      const loc = declLocation(decl);
+
+      let sigDecl: ts.SignatureDeclaration | undefined = undefined;
+      try {
+        sigDecl = t.getConstructSignatures()[0]?.getDeclaration() as
+          | ts.SignatureDeclaration
+          | undefined;
+      } catch {}
+
+      if (loc.fileName === sf.fileName) {
+        const tgtId = idByDeclPos.get(loc.pos);
+        return tgtId ? { tgtId, sigDecl } : null;
+      }
+
+      const extId = ensureExternalNode(calleeName, loc);
+      return { tgtId: extId, sigDecl };
+    } catch {
+      return null;
+    }
+  };
+
+  // walk bodies with owner tracking
   const walk = (node: ts.Node, ownerId: string) => {
     // owner switches
     if (ts.isFunctionDeclaration(node) && node.name && node.body) {
@@ -481,51 +758,30 @@ function buildActiveFileGraph(
       return;
     }
 
-    // edge detection
+    // edges
     if (ts.isCallExpression(node)) {
-      const targetPos = resolveTargetDeclPos(node.expression, "calls");
-      if (targetPos != null) {
-        const tgtId = idByDeclPos.get(targetPos);
-        if (tgtId) {
-          addEdge("calls", ownerId, tgtId);
-
-          const sig = checker.getResolvedSignature(node);
-          const sigDecl = sig?.getDeclaration() as
-            | ts.SignatureDeclaration
-            | undefined;
-          addDataflowEdgesFromSignature(
-            ownerId,
-            tgtId,
-            sigDecl,
-            node.arguments,
-          );
-        }
+      const r = resolveCallTarget(node);
+      if (r) {
+        addEdge("calls", ownerId, r.tgtId);
+        addDataflowEdgesFromSignature(
+          ownerId,
+          r.tgtId,
+          r.sigDecl,
+          node.arguments,
+        );
       }
     }
 
     if (ts.isNewExpression(node)) {
-      const targetPos = resolveTargetDeclPos(node.expression, "constructs");
-      if (targetPos != null) {
-        const tgtId = idByDeclPos.get(targetPos);
-        if (tgtId) {
-          addEdge("constructs", ownerId, tgtId);
-
-          let sigDecl: ts.SignatureDeclaration | undefined = undefined;
-          try {
-            const t = checker.getTypeAtLocation(node.expression);
-            sigDecl = t.getConstructSignatures()[0]?.getDeclaration() as
-              | ts.SignatureDeclaration
-              | undefined;
-          } catch {
-            sigDecl = undefined;
-          }
-          addDataflowEdgesFromSignature(
-            ownerId,
-            tgtId,
-            sigDecl,
-            node.arguments,
-          );
-        }
+      const r = resolveNewTarget(node);
+      if (r) {
+        addEdge("constructs", ownerId, r.tgtId);
+        addDataflowEdgesFromSignature(
+          ownerId,
+          r.tgtId,
+          r.sigDecl,
+          node.arguments,
+        );
       }
     }
 
@@ -537,7 +793,7 @@ function buildActiveFileGraph(
   return { nodes, edges };
 }
 
-/** ✅ calls: 정규화 + declaration 위치 resolve */
+/** calls: normalize + resolve declaration location (cross-file enabled by Program) */
 function extractCallsResolved(
   sf: ts.SourceFile,
   checker: ts.TypeChecker,
@@ -701,7 +957,7 @@ function pickBestDeclaration(
   const decls = s.getDeclarations();
   if (!decls || decls.length === 0) return undefined;
 
-  // 구현체 우선
+  // implementation preferred
   const impl = decls.find(
     (d) =>
       ts.isMethodDeclaration(d) ||

@@ -1,8 +1,7 @@
-//src/panel/CodeGraphPanel.ts (패널/이벤트/메시징 전담)
 import * as vscode from "vscode";
 import * as path from "path";
 import { getWebviewHtml } from "../webview/html";
-import { analyzeActiveFile } from "../analyzer";
+import { analyzeWorkspaceActive } from "../analyzer";
 import type {
   ExtToWebviewMessage,
   WebviewToExtMessage,
@@ -12,6 +11,10 @@ export class CodeGraphPanel {
   private lastTextEditor: vscode.TextEditor | undefined;
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
+
+  // cache workspace file list (ts/js)
+  private cachedFilePaths: string[] = [];
+  private cachedAt = 0;
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
@@ -46,7 +49,10 @@ export class CodeGraphPanel {
         try {
           if (msg.type === "requestActiveFile") return this.postActiveFile();
           if (msg.type === "requestSelection") return this.postSelection();
-          if (msg.type === "analyzeActiveFile") return this.postAnalysis();
+          if (msg.type === "analyzeActiveFile") return this.postAnalysis(); // workspace-aware
+          if (msg.type === "analyzeWorkspace") return this.postAnalysis(); // explicit
+          if (msg.type === "expandNode")
+            return this.postAnalysisForFile(msg.payload.filePath);
         } catch (e) {
           console.error("[codegraph] onDidReceiveMessage error:", e);
         }
@@ -59,13 +65,13 @@ export class CodeGraphPanel {
     this.postActiveFile();
     this.postSelection();
 
-    // ---- MVP: auto-analysis for active file changes (debounced) ----
+    // ---- auto-analysis for active file changes (debounced) ----
     const scheduleAnalysis = (delayMs: number) => {
       if (this.analysisTimer) clearTimeout(this.analysisTimer);
       this.analysisTimer = setTimeout(
         () => {
           try {
-            this.postAnalysis();
+            void this.postAnalysis();
           } catch (e) {
             console.error("[codegraph] auto-analysis error:", e);
           }
@@ -110,17 +116,58 @@ export class CodeGraphPanel {
       this.postSelection();
     });
 
+    // invalidate cache when files change (coarse)
+    const subFs = vscode.workspace.onDidCreateFiles(() =>
+      this.invalidateWorkspaceCache(),
+    );
+    const subFs2 = vscode.workspace.onDidDeleteFiles(() =>
+      this.invalidateWorkspaceCache(),
+    );
+    const subFs3 = vscode.workspace.onDidRenameFiles(() =>
+      this.invalidateWorkspaceCache(),
+    );
+
     this.panel.onDidDispose(() => {
       subActive.dispose();
       subChange.dispose();
       subSave.dispose();
       subSelection.dispose();
+      subFs.dispose();
+      subFs2.dispose();
+      subFs3.dispose();
       if (this.analysisTimer) clearTimeout(this.analysisTimer);
     });
   }
 
+  private invalidateWorkspaceCache() {
+    this.cachedAt = 0;
+    this.cachedFilePaths = [];
+  }
+
   private getEditor(): vscode.TextEditor | undefined {
     return this.lastTextEditor ?? vscode.window.activeTextEditor;
+  }
+
+  private getWorkspaceRoot(): string | null {
+    const ws = vscode.workspace.workspaceFolders?.[0];
+    return ws?.uri.fsPath ?? null;
+  }
+
+  private async getWorkspaceFilePaths(): Promise<string[]> {
+    const now = Date.now();
+    // refresh every 10 seconds at most (cheap throttle)
+    if (this.cachedFilePaths.length && now - this.cachedAt < 10_000) {
+      return this.cachedFilePaths;
+    }
+
+    const files = await vscode.workspace.findFiles(
+      "**/*.{ts,tsx,js,jsx}",
+      "**/{node_modules,dist,build,out,.next}/**",
+      4000,
+    );
+    this.cachedFilePaths = files.map((u) => u.fsPath);
+    this.cachedAt = now;
+    return this.cachedFilePaths;
   }
 
   private postActiveFile() {
@@ -167,7 +214,7 @@ export class CodeGraphPanel {
     this.panel.webview.postMessage(message);
   }
 
-  private postAnalysis() {
+  private async postAnalysis() {
     const editor = this.getEditor();
     if (!editor) {
       this.panel.webview.postMessage({
@@ -180,10 +227,17 @@ export class CodeGraphPanel {
     const doc = editor.document;
     const text = doc.getText();
 
-    const result = analyzeActiveFile({
-      code: text,
-      fileName: doc.fileName,
-      languageId: doc.languageId,
+    const workspaceRoot = this.getWorkspaceRoot();
+    const filePaths = await this.getWorkspaceFilePaths();
+
+    const result = analyzeWorkspaceActive({
+      active: {
+        code: text,
+        fileName: doc.fileName,
+        languageId: doc.languageId,
+      },
+      workspaceRoot,
+      filePaths,
     });
 
     const payload: Extract<
@@ -201,9 +255,10 @@ export class CodeGraphPanel {
       exports: result.exports,
       calls: result.calls,
       graph: result.graph,
+      meta: result.meta,
     };
 
-    console.log("[analysis.calls sample]", result.calls.slice(0, 6));
+    console.log("[analysis.meta]", result.meta);
     console.log(
       "[analysis.graph counts]",
       "nodes=",
@@ -217,4 +272,53 @@ export class CodeGraphPanel {
       payload,
     } satisfies ExtToWebviewMessage);
   }
+
+  private async postAnalysisForFile(filePath: string) {
+    const workspaceRoot = this.getWorkspaceRoot();
+    const filePaths = await this.getWorkspaceFilePaths();
+
+    const uri = vscode.Uri.file(filePath);
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    const code = new TextDecoder("utf-8").decode(bytes);
+
+    const languageId = guessLanguageId(filePath);
+
+    const result = analyzeWorkspaceActive({
+      active: { code, fileName: filePath, languageId },
+      workspaceRoot,
+      filePaths,
+    });
+
+    const payload: Extract<
+      ExtToWebviewMessage,
+      { type: "analysisResult" }
+    >["payload"] = {
+      uri: uri.toString(),
+      fileName: path.basename(filePath),
+      languageId,
+      stats: {
+        chars: code.length,
+        lines: code.split(/\r?\n/).length,
+      },
+      imports: result.imports,
+      exports: result.exports,
+      calls: result.calls,
+      graph: result.graph,
+      meta: result.meta,
+    };
+
+    this.panel.webview.postMessage({
+      type: "analysisResult",
+      payload,
+    } satisfies ExtToWebviewMessage);
+  }
+}
+
+function guessLanguageId(filePath: string): string {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith(".tsx")) return "typescriptreact";
+  if (lower.endsWith(".ts")) return "typescript";
+  if (lower.endsWith(".jsx")) return "javascriptreact";
+  if (lower.endsWith(".js")) return "javascript";
+  return "typescript";
 }

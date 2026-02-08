@@ -2,7 +2,9 @@
 export type WebviewToExtMessage =
   | { type: "requestActiveFile" }
   | { type: "requestSelection" }
-  | { type: "analyzeActiveFile" };
+  | { type: "analyzeActiveFile" }
+  | { type: "analyzeWorkspace" }
+  | { type: "expandNode"; filePath: string };
 
 /** calls(V1/V2) */
 export type CallV1 = { name: string; count: number };

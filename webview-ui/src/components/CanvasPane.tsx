@@ -1,7 +1,7 @@
 // import "./../App.css";
 import "reactflow/dist/style.css";
 import "./CanvasPane.css";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import ReactFlow, {
   Background,
   ReactFlowProvider,
@@ -14,11 +14,20 @@ import ReactFlow, {
   type EdgeProps,
   type Edge,
   type Node,
+  // type NodeMouseHandler,
   type ReactFlowInstance,
 } from "reactflow";
 
 import { Crosshair, Network, Sigma, ZoomIn, ZoomOut } from "lucide-react";
 import type { GraphNode, GraphPayload } from "../lib/vscode";
+
+type CodeNodeData = {
+  title: string;
+  subtitle: string;
+  kind: GraphNode["kind"];
+  /** Absolute/relative file path used to expand external nodes. */
+  file: string;
+};
 
 type Props = {
   hasData: boolean;
@@ -33,6 +42,9 @@ type Props = {
 
   onGenerateFromActive: () => void;
   onUseSelectionAsRoot: () => void;
+
+  /** When an external node is clicked, request expansion by file path. */
+  onExpandExternal?: (filePath: string) => void;
 };
 
 function shortFile(p: string) {
@@ -65,7 +77,7 @@ function CodeNode({
   data,
   selected,
 }: {
-  data: { title: string; subtitle: string; kind: string };
+  data: CodeNodeData;
   selected?: boolean;
 }) {
   return (
@@ -163,7 +175,7 @@ function DataflowEdge({
 
 const edgeTypes = { dataflow: DataflowEdge };
 
-function toReactFlowNodes(graph?: GraphPayload): Node[] {
+function toReactFlowNodes(graph?: GraphPayload): Array<Node<CodeNodeData>> {
   if (!graph) return [];
   const layout = buildLayout(graph.nodes);
   const posById = new Map(layout.map((p) => [p.id, p.position]));
@@ -172,22 +184,29 @@ function toReactFlowNodes(graph?: GraphPayload): Node[] {
     const pos = posById.get(n.id) ?? { x: 0, y: 0 };
     const subtitle = `${n.kind} · ${shortFile(n.file)}:${n.range.start.line + 1}`;
 
+    const data: CodeNodeData = {
+      title: nodeTitle(n),
+      subtitle,
+      kind: n.kind,
+      file: n.file,
+    };
+
     return {
       id: n.id,
       position: pos,
       type: "code",
-      data: { title: nodeTitle(n), subtitle, kind: n.kind },
-    } satisfies Node;
+      data,
+    };
   });
 }
 
-function toReactFlowEdges(graph?: GraphPayload): Edge[] {
+function toReactFlowEdges(graph?: GraphPayload): Array<Edge<DataflowEdgeData>> {
   if (!graph) return [];
 
   return graph.edges.map((e) => {
     const isDataflow = e.kind === "dataflow";
 
-    return {
+    const edge: Edge<DataflowEdgeData> = {
       id: e.id,
       source: e.source,
       target: e.target,
@@ -203,12 +222,9 @@ function toReactFlowEdges(graph?: GraphPayload): Edge[] {
 
       // ✅ Dataflow 라벨
       data: isDataflow ? { label: e.label ?? "" } : undefined,
+    };
 
-      // ✅ Dataflow 점선/컬러는 BaseEdge가 style로 받음
-      // style: isDataflow
-      //   ? { strokeDasharray: "6 4", stroke: "rgba(59, 130, 246, 0.85)" }
-      //   : undefined,
-    } satisfies Edge;
+    return edge;
   });
 }
 
@@ -220,11 +236,30 @@ function CanvasFlow({
   onClearSelection,
   onGenerateFromActive,
   onUseSelectionAsRoot,
+  onExpandExternal,
 }: Props) {
   const rfRef = useRef<ReactFlowInstance | null>(null);
 
-  const rfNodes = useMemo(() => toReactFlowNodes(graph), [graph]);
-  const rfEdges = useMemo(() => toReactFlowEdges(graph), [graph]);
+  const rfNodes = useMemo<Array<Node<CodeNodeData>>>(
+    () => toReactFlowNodes(graph),
+    [graph],
+  );
+
+  const rfEdges = useMemo<Array<Edge<DataflowEdgeData>>>(
+    () => toReactFlowEdges(graph),
+    [graph],
+  );
+
+  const handleNodeClick = (
+    _event: ReactMouseEvent,
+    node: Node<CodeNodeData>,
+  ) => {
+    onSelectNode(node.id);
+
+    if (node.data.kind === "external") {
+      onExpandExternal?.(node.data.file);
+    }
+  };
 
   const onZoomIn = () => rfRef.current?.zoomIn?.();
   const onZoomOut = () => rfRef.current?.zoomOut?.();
@@ -298,7 +333,7 @@ function CanvasFlow({
               inst.fitView({ padding: 0.25, duration: 0 });
             }}
             onPaneClick={() => onClearSelection()}
-            onNodeClick={(_, node) => onSelectNode(node.id)}
+            onNodeClick={handleNodeClick}
             fitView
           >
             <Background />
