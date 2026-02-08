@@ -36,7 +36,12 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
   margin: 0;
+}
+
+#root {
+  display: flex;
 }
 
 body {
@@ -52,6 +57,8 @@ body {
 
 .appRoot {
   height: 100%;
+  width: 100%;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -345,6 +352,9 @@ body.vscode-high-contrast .logoDark {
 .main {
   flex: 1;
   display: flex;
+  width: 100%;
+  align-items: stretch;
+  /* 추가 */
   overflow: hidden;
   min-height: 0;
   min-width: 0;
@@ -615,6 +625,14 @@ body.vscode-high-contrast .logoDark {
   width: 320px;
   min-width: 260px;
   max-width: 420px;
+
+  height: 100%;
+  /* 추가 */
+  align-self: stretch;
+  /* 추가 */
+  flex: 0 0 auto;
+  /* 추가(폭 고정 성격 명확히) */
+
   border-left: 1px solid var(--border);
   background: var(--panel);
   display: flex;
