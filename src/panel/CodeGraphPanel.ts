@@ -1,3 +1,4 @@
+//src/panel/CodeGraphPanel.ts (패널/이벤트/메시징 전담)
 import * as vscode from "vscode";
 import * as path from "path";
 import { getWebviewHtml } from "../webview/html";

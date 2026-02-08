@@ -1,3 +1,4 @@
+//src/analyzer/analyze.ts (TypeScript 코드 분석기)
 import * as path from "path";
 import * as ts from "typescript";
 import type {

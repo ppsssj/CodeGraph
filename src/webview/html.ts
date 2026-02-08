@@ -1,3 +1,4 @@
+//src/webview/html.ts (HTML/CSP/nonce 분리)
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
