@@ -8,6 +8,13 @@
   CodeGraph는 <b>VS Code 확장(Extension Host)</b>과 <b>Webview(React + Vite)</b>로 구성된 코드 분석/시각화 도구의 MVP입니다.
 </p>
 
+
+<p align="center">
+  <b>Motivation:</b> 대규모 코드베이스에서는 함수/메서드 간 호출과 파라미터 흐름을 파악하기 어려워 가독성이 떨어집니다.  
+  CodeGraph는 코드의 각 요소를 노드, 호출/파라미터 흐름을 엣지로 시각화하여 개발자가 빠르게 이해할 수 있도록 돕는 것을 목표로 합니다.  
+  최종적으로는 <b>VSCode Extension</b>으로 실시간 분석/시각화 기능 제공을 계획하고 있습니다.
+</p>
+
 ---
 
 ## Architecture Overview
