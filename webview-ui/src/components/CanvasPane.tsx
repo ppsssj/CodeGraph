@@ -1,3 +1,4 @@
+// import "./../App.css";
 import "reactflow/dist/style.css";
 import "./CanvasPane.css";
 import { useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
@@ -13,20 +14,31 @@ import ReactFlow, {
   type EdgeProps,
   type Edge,
   type Node,
+  // type NodeMouseHandler,
   type ReactFlowInstance,
 } from "reactflow";
 
-import { Crosshair, Network, Sigma, ZoomIn, ZoomOut, X } from "lucide-react";
+import { Crosshair, Network, Sigma, ZoomIn, ZoomOut } from "lucide-react";
 import type { GraphNode, GraphPayload } from "../lib/vscode";
 import type { ChipKey } from "./FiltersBar";
+
+type GraphEdge = GraphPayload["edges"][number];
 
 type CodeNodeData = {
   title: string;
   subtitle: string;
   kind: GraphNode["kind"];
+  subkind?: InterfaceSubkind;
   /** Absolute/relative file path used to expand external nodes. */
   file: string;
 };
+
+type InterfaceSubkind = "interface" | "type" | "enum";
+
+function getInterfaceSubkind(n: GraphNode): InterfaceSubkind | undefined {
+  const v = (n as unknown as { subkind?: unknown }).subkind;
+  return v === "interface" || v === "type" || v === "enum" ? v : undefined;
+}
 
 type Props = {
   hasData: boolean;
@@ -34,13 +46,11 @@ type Props = {
   // analysisResult.payload.graph
   graph?: GraphPayload;
 
-  // filtering/search
+  // UI state forwarded from App
   activeFilter: ChipKey;
   searchQuery: string;
-
-  // rooting (optional)
-  rootNodeId: string | null;
-  onClearRoot: () => void;
+  rootNodeId: string | null;     // ✅ 추가
+  onClearRoot: () => void;  
 
   // selection bridge to Inspector
   selectedNodeId: string | null;
@@ -66,68 +76,6 @@ function nodeTitle(n: GraphNode) {
   return n.name;
 }
 
-function allowKindByFilter(kind: GraphNode["kind"], filter: ChipKey) {
-  switch (filter) {
-    case "functions":
-      return kind === "function" || kind === "method";
-    case "classes":
-      return kind === "class";
-    case "files":
-      return kind === "file";
-    // interface/variable kinds aren't in protocol yet
-    case "interfaces":
-    case "variables":
-    default:
-      return true;
-  }
-}
-
-function buildRootSubgraph(graph: GraphPayload, rootId: string, depth: number) {
-  const adj = new Map<string, Set<string>>();
-  for (const e of graph.edges) {
-    if (!adj.has(e.source)) adj.set(e.source, new Set());
-    if (!adj.has(e.target)) adj.set(e.target, new Set());
-    adj.get(e.source)!.add(e.target);
-    adj.get(e.target)!.add(e.source); // undirected traversal for context
-  }
-
-  const keep = new Set<string>();
-  keep.add(rootId);
-
-  let frontier = new Set<string>([rootId]);
-  for (let d = 0; d < depth; d++) {
-    const next = new Set<string>();
-    for (const id of frontier) {
-      for (const nb of adj.get(id) ?? []) {
-        if (!keep.has(nb)) {
-          keep.add(nb);
-          next.add(nb);
-        }
-      }
-    }
-    frontier = next;
-    if (frontier.size === 0) break;
-  }
-
-  const nodes = graph.nodes.filter((n) => keep.has(n.id));
-  const edges = graph.edges.filter((e) => keep.has(e.source) && keep.has(e.target));
-  return { nodes, edges };
-}
-
-function filterGraph(graph: GraphPayload, activeFilter: ChipKey, searchQuery: string) {
-  const q = searchQuery.trim().toLowerCase();
-  const nodes = graph.nodes.filter((n) => {
-    if (!allowKindByFilter(n.kind, activeFilter)) return false;
-    if (!q) return true;
-    const hay = `${n.name} ${n.kind} ${n.file}`.toLowerCase();
-    return hay.includes(q);
-  });
-
-  const keep = new Set(nodes.map((n) => n.id));
-  const edges = graph.edges.filter((e) => keep.has(e.source) && keep.has(e.target));
-  return { nodes, edges };
-}
-
 // Minimal deterministic layout (no deps)
 function buildLayout(nodes: GraphNode[]) {
   const colW = 260;
@@ -141,8 +89,14 @@ function buildLayout(nodes: GraphNode[]) {
   });
 }
 
-/** Custom node so we always render title/subtitle. */
-function CodeNode({ data, selected }: { data: CodeNodeData; selected?: boolean }) {
+/** Custom node so we always render title/subtitle (default node expects data.label). */
+function CodeNode({
+  data,
+  selected,
+}: {
+  data: CodeNodeData;
+  selected?: boolean;
+}) {
   return (
     <div
       className={[
@@ -156,7 +110,7 @@ function CodeNode({ data, selected }: { data: CodeNodeData; selected?: boolean }
 
       <div className="cgNodeTop">
         <span className={`cgBadge cgBadge--${data.kind}`}>
-          {String(data.kind).toUpperCase()}
+          {String((String(data.kind) === "interface" && data.subkind) ? data.subkind : data.kind).toUpperCase()}
         </span>
       </div>
 
@@ -192,20 +146,28 @@ function DataflowEdge({
 
   const label = typeof data?.label === "string" ? data.label : "";
 
+  // ✅ 라벨 겹침 방지: extension에서 id에 넣은 "@@arg#i"를 파싱해 y-offset 적용
+  // ✅ arg index 파싱
   const m = String(id).match(/@@arg#(\d+)/);
   const argIndex = m ? Number(m[1]) : 0;
 
+  // ✅ 라벨을 "간선 방향의 법선"으로 옆으로 이동시켜 노드와 겹침 최소화
   const dx = targetX - sourceX;
   const dy = targetY - sourceY;
   const len = Math.hypot(dx, dy) || 1;
 
+  // 법선 단위벡터 (edge에 수직)
   const nx = -dy / len;
   const ny = dx / len;
 
+  // 0,1,2,3... -> +,-,+,- 형태로 퍼지게 (라벨이 한쪽으로만 몰리지 않게)
   const side = argIndex % 2 === 0 ? 1 : -1;
   const tier = Math.floor(argIndex / 2) + 1;
+
+  // ✅ 간격(픽셀): 라벨/노드 겹침 방지용. 필요 시 16~28 사이로 조정
   const sep = 20;
 
+  // 최종 오프셋
   const ox = nx * sep * tier * side;
   const oy = ny * sep * tier * side;
 
@@ -228,6 +190,7 @@ function DataflowEdge({
   );
 }
 
+
 const edgeTypes = { dataflow: DataflowEdge };
 
 function toReactFlowNodes(graph?: GraphPayload): Array<Node<CodeNodeData>> {
@@ -235,14 +198,17 @@ function toReactFlowNodes(graph?: GraphPayload): Array<Node<CodeNodeData>> {
   const layout = buildLayout(graph.nodes);
   const posById = new Map(layout.map((p) => [p.id, p.position]));
 
-  return graph.nodes.map((n) => {
+  return graph.nodes.map((n: GraphNode) => {
     const pos = posById.get(n.id) ?? { x: 0, y: 0 };
-    const subtitle = `${n.kind} · ${shortFile(n.file)}:${n.range.start.line + 1}`;
+    const sk = getInterfaceSubkind(n);
+    const kindLabel = (String(n.kind) === "interface" && sk) ? sk : n.kind;
+    const subtitle = `${kindLabel} · ${shortFile(n.file)}:${n.range.start.line + 1}`;
 
     const data: CodeNodeData = {
       title: nodeTitle(n),
       subtitle,
       kind: n.kind,
+      subkind: getInterfaceSubkind(n),
       file: n.file,
     };
 
@@ -258,10 +224,10 @@ function toReactFlowNodes(graph?: GraphPayload): Array<Node<CodeNodeData>> {
 function toReactFlowEdges(graph?: GraphPayload): Array<Edge<DataflowEdgeData>> {
   if (!graph) return [];
 
-  return graph.edges.map((e) => {
+  return graph.edges.map((e: GraphEdge) => {
     const isDataflow = e.kind === "dataflow";
 
-    return {
+    const edge: Edge<DataflowEdgeData> = {
       id: e.id,
       source: e.source,
       target: e.target,
@@ -272,19 +238,20 @@ function toReactFlowEdges(graph?: GraphPayload): Array<Edge<DataflowEdgeData>> {
           : isDataflow
             ? "cgEdge cgEdge--dataflow"
             : "cgEdge cgEdge--calls",
+
       markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+
+      // ✅ Dataflow 라벨
       data: isDataflow ? { label: e.label ?? "" } : undefined,
     };
+
+    return edge;
   });
 }
 
 function CanvasFlow({
   hasData,
   graph,
-  activeFilter,
-  searchQuery,
-  rootNodeId,
-  onClearRoot,
   selectedNodeId,
   onSelectNode,
   onClearSelection,
@@ -294,18 +261,25 @@ function CanvasFlow({
 }: Props) {
   const rfRef = useRef<ReactFlowInstance | null>(null);
 
-  const visibleGraph = useMemo(() => {
-    if (!graph) return undefined;
-    const rooted = rootNodeId ? buildRootSubgraph(graph, rootNodeId, 2) : graph;
-    return filterGraph(rooted, activeFilter, searchQuery);
-  }, [graph, rootNodeId, activeFilter, searchQuery]);
+  const rfNodes = useMemo<Array<Node<CodeNodeData>>>(
+    () => toReactFlowNodes(graph),
+    [graph],
+  );
 
-  const rfNodes = useMemo<Array<Node<CodeNodeData>>>(() => toReactFlowNodes(visibleGraph), [visibleGraph]);
-  const rfEdges = useMemo<Array<Edge<DataflowEdgeData>>>(() => toReactFlowEdges(visibleGraph), [visibleGraph]);
+  const rfEdges = useMemo<Array<Edge<DataflowEdgeData>>>(
+    () => toReactFlowEdges(graph),
+    [graph],
+  );
 
-  const handleNodeClick = (_event: ReactMouseEvent, node: Node<CodeNodeData>) => {
+  const handleNodeClick = (
+    _event: ReactMouseEvent,
+    node: Node<CodeNodeData>,
+  ) => {
     onSelectNode(node.id);
-    if (node.data.kind === "external") onExpandExternal?.(node.data.file);
+
+    if (node.data.kind === "external") {
+      onExpandExternal?.(node.data.file);
+    }
   };
 
   const onZoomIn = () => rfRef.current?.zoomIn?.();
@@ -317,31 +291,20 @@ function CanvasFlow({
     if (selectedNodeId) {
       const n = inst.getNode(selectedNodeId);
       if (n) {
-        inst.setCenter(n.position.x + 80, n.position.y + 40, { zoom: 1.1, duration: 200 });
+        inst.setCenter(n.position.x + 80, n.position.y + 40, {
+          zoom: 1.1,
+          duration: 200,
+        });
         return;
       }
     }
+
     inst.fitView({ padding: 0.2, duration: 250 });
   };
 
   return (
     <section className="canvas">
       <div className="canvasGrid" />
-
-      {hasData && rootNodeId ? (
-        <div style={{ position: "absolute", top: 12, left: 12, zIndex: 10 }}>
-          <button
-            type="button"
-            className="smallBtn"
-            onClick={onClearRoot}
-            title="Clear Root"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-          >
-            <X className="icon" />
-            Clear Root
-          </button>
-        </div>
-      ) : null}
 
       {!hasData ? (
         <div className="emptyState">
@@ -351,16 +314,27 @@ function CanvasFlow({
 
           <div className="emptyText">
             <h3>No graph data generated</h3>
-            <p>Click Generate to analyze the active file and build initial graph data.</p>
+            <p>
+              Click Generate to analyze the active file and build initial graph
+              data.
+            </p>
           </div>
 
           <div className="emptyActions">
-            <button className="ctaBtn" type="button" onClick={onGenerateFromActive}>
+            <button
+              className="ctaBtn"
+              type="button"
+              onClick={onGenerateFromActive}
+            >
               <Network className="icon ctaIcon" />
               <span>Generate from Active File</span>
             </button>
 
-            <button className="ctaBtn" type="button" onClick={onUseSelectionAsRoot}>
+            <button
+              className="ctaBtn"
+              type="button"
+              onClick={onUseSelectionAsRoot}
+            >
               <Sigma className="icon ctaIcon" />
               <span>Use Selection as Root</span>
             </button>
@@ -390,15 +364,33 @@ function CanvasFlow({
 
       <div className="canvasControls">
         <div className="controlsCard">
-          <button className="controlBtn" type="button" title="Zoom in" onClick={onZoomIn} disabled={!hasData}>
+          <button
+            className="controlBtn"
+            type="button"
+            title="Zoom in"
+            onClick={onZoomIn}
+            disabled={!hasData}
+          >
             <ZoomIn className="icon" />
           </button>
           <div className="controlSep" />
-          <button className="controlBtn" type="button" title="Zoom out" onClick={onZoomOut} disabled={!hasData}>
+          <button
+            className="controlBtn"
+            type="button"
+            title="Zoom out"
+            onClick={onZoomOut}
+            disabled={!hasData}
+          >
             <ZoomOut className="icon" />
           </button>
           <div className="controlSep" />
-          <button className="controlBtn" type="button" title="Center" onClick={onCenter} disabled={!hasData}>
+          <button
+            className="controlBtn"
+            type="button"
+            title="Center"
+            onClick={onCenter}
+            disabled={!hasData}
+          >
             <Crosshair className="icon" />
           </button>
         </div>

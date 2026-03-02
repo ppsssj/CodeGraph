@@ -1,9 +1,9 @@
+// import "./../App.css";
 import { Settings } from "lucide-react";
 import type { ExtToWebviewMessage, GraphNode } from "../lib/vscode";
 import { ActiveFileSnapshot } from "./ActiveFileSnapshot";
 import { AnalysisPanel } from "./AnalysisPanel";
 import "./Inspector.css";
-
 type ActiveFilePayload = Extract<
   ExtToWebviewMessage,
   { type: "activeFile" }
@@ -21,15 +21,12 @@ type Props = {
   activeFile: ActiveFilePayload;
   selection: SelectionPayload;
   analysis: AnalysisPayload;
-
   selectedNode: GraphNode | null;
-
-  rootNode: GraphNode | null;
-  onClearRoot: () => void;
-
   onRefreshActive: () => void;
   onResetGraph: () => void;
   onExpandExternal: (filePath: string) => void;
+  rootNode?: GraphNode | null;
+  onClearRoot?: () => void;
 };
 
 function shortFile(p: string) {
@@ -43,16 +40,39 @@ function fmtRange(n: GraphNode) {
   return `${s.line + 1}:${s.character + 1} → ${e.line + 1}:${e.character + 1}`;
 }
 
+type NodeSig = {
+  params: Array<{ name: string; type?: string; optional?: boolean }>;
+  returnType?: string;
+};
+
+type GraphNodeWithSig = GraphNode & { sig?: NodeSig; signature?: string };
+
+function fmtSig(n: GraphNodeWithSig) {
+  if (n.sig && Array.isArray(n.sig.params)) {
+    const params = n.sig.params
+      .map((p) => {
+        const opt = p.optional ? "?" : "";
+        const ty = p.type ? `: ${p.type}` : "";
+        return `${p.name}${opt}${ty}`;
+      })
+      .join(", ");
+    const ret = n.sig.returnType ? `: ${n.sig.returnType}` : "";
+    return `(${params})${ret}`;
+  }
+
+  return n.signature?.trim() ? n.signature : "(none)";
+}
+
 export function Inspector({
   activeFile,
   selection,
   analysis,
   selectedNode,
-  rootNode,
-  onClearRoot,
   onRefreshActive,
   onResetGraph,
   onExpandExternal,
+  rootNode = null,
+  onClearRoot,
 }: Props) {
   return (
     <aside className="inspector">
@@ -73,11 +93,6 @@ export function Inspector({
         <button className="smallBtn" type="button" onClick={onResetGraph}>
           Reset Graph
         </button>
-        {rootNode ? (
-          <button className="smallBtn" type="button" onClick={onClearRoot} title={rootNode.name}>
-            Clear Root
-          </button>
-        ) : null}
         {selectedNode && selectedNode.kind === "external" ? (
           <button
             className="smallBtn"
@@ -99,12 +114,20 @@ export function Inspector({
             onRefresh={onRefreshActive}
           />
 
-          {/* ROOT */}
+          {/* ✅ Root node (optional) */}
           <div className="panel">
-            <div className="panelHeader">
+            <div
+              className="panelHeader"
+              style={{ display: "flex", justifyContent: "space-between" }}
+            >
               <span>ROOT</span>
+              {rootNode && onClearRoot ? (
+                <button className="smallBtn" type="button" onClick={onClearRoot}>
+                  Clear Root
+                </button>
+              ) : null}
             </div>
-            <div className="panelBody" style={{ gap: 10 }}>
+            <div className="panelBody">
               {!rootNode ? (
                 <div className="mutedText">No root selected.</div>
               ) : (
@@ -121,44 +144,54 @@ export function Inspector({
                     <div className="kvKey mono">file</div>
                     <div className="kvVal mono">{shortFile(rootNode.file)}</div>
                   </div>
+                  <div className="kvRow">
+                    <div className="kvKey mono">range</div>
+                    <div className="kvVal mono">{fmtRange(rootNode)}</div>
+                  </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* SELECTED NODE */}
+          {/* ✅ Selected node details (P0) */}
           <div className="panel">
             <div className="panelHeader">
               <span>SELECTED NODE</span>
             </div>
             <div className="panelBody" style={{ gap: 10 }}>
               {!selectedNode ? (
-                <div className="mutedText">No node selected. Click a node in the graph.</div>
+                <div className="mutedText">
+                  No node selected. Click a node in the graph.
+                </div>
               ) : (
-                <div className="kvList">
-                  <div className="kvRow">
-                    <div className="kvKey mono">kind</div>
-                    <div className="kvVal mono">{selectedNode.kind}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">name</div>
-                    <div className="kvVal mono">{selectedNode.name}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">file</div>
-                    <div className="kvVal mono">{shortFile(selectedNode.file)}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">range</div>
-                    <div className="kvVal mono">{fmtRange(selectedNode)}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">signature</div>
-                    <div className="kvVal mono">
-                      {selectedNode.signature?.trim() ? selectedNode.signature : "(none)"}
+                <>
+                  <div className="kvList">
+                    <div className="kvRow">
+                      <div className="kvKey mono">kind</div>
+                      <div className="kvVal mono">{selectedNode.kind}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">name</div>
+                      <div className="kvVal mono">{selectedNode.name}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">file</div>
+                      <div className="kvVal mono">
+                        {shortFile(selectedNode.file)}
+                      </div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">range</div>
+                      <div className="kvVal mono">{fmtRange(selectedNode)}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">signature</div>
+                      <div className="kvVal mono">
+                        {fmtSig(selectedNode as GraphNodeWithSig)}
+                      </div>
                     </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
           </div>
@@ -170,7 +203,9 @@ export function Inspector({
             <div className="panelBody">
               <div className="mono" style={{ fontSize: 11, opacity: 0.85 }}>
                 {selection
-                  ? `${selection.start.line + 1}:${selection.start.character} → ${selection.end.line + 1}:${selection.end.character}`
+                  ? `${selection.start.line + 1}:${selection.start.character} → ${selection.end.line + 1}:${
+                      selection.end.character
+                    }`
                   : "No selection"}
               </div>
 

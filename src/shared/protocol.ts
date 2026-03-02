@@ -23,6 +23,7 @@ export type GraphNodeKind =
   | "function"
   | "method"
   | "class"
+  | "interface"
   | "external";
 
 export type GraphNode = {
@@ -35,6 +36,11 @@ export type GraphNode = {
     end: { line: number; character: number };
   };
   signature?: string;
+  sig?: {
+    params: Array<{ name: string; type: string; optional?: boolean }>;
+    returnType?: string;
+  };
+  subkind?: "interface" | "type" | "enum";
 };
 
 export type GraphEdgeKind = "calls" | "constructs" | "dataflow";

@@ -497,26 +497,59 @@ function buildActiveFileGraph(
     range: sourceFileRange(),
   });
 
+  type SigParts = {
+    params: Array<{ name: string; type: string; optional?: boolean }>;
+    returnType?: string;
+  };
+
+  const getSigParts = (decl: ts.SignatureDeclarationBase): SigParts | undefined => {
+    try {
+      const sig = checker.getSignatureFromDeclaration(decl as ts.SignatureDeclaration);
+      if (!sig) return undefined;
+      const params = sig.getParameters().map((sym) => {
+        const name = sym.getName();
+        const t = checker.getTypeOfSymbolAtLocation(sym, decl);
+        const optional = Boolean(
+          (sym.flags & ts.SymbolFlags.Optional) !== 0 ||
+            decl.parameters.some((p) =>
+              ts.isIdentifier(p.name)
+                ? p.name.text === name && (!!p.questionToken || !!p.initializer)
+                : false,
+            ),
+        );
+        return {
+          name,
+          type: checker.typeToString(t),
+          ...(optional ? { optional } : null),
+        } as { name: string; type: string; optional?: boolean };
+      });
+      const returnType = checker.typeToString(sig.getReturnType());
+      return { params, returnType };
+    } catch {
+      return undefined;
+    }
+  };
+
   const pushNode = (
     decl: ts.Declaration,
     kind: GraphNodeKind,
     name: string,
+    extra?: Partial<GraphNode>,
   ) => {
     const loc = declLocation(decl);
     const id = mkId(kind, loc.fileName, loc.pos);
     idByDeclPos.set(loc.pos, id);
 
     let signature: string | undefined = undefined;
+    let sigParts: SigParts | undefined = undefined;
     try {
-      if (
-        ts.isFunctionDeclaration(decl) ||
-        ts.isMethodDeclaration(decl) ||
-        ts.isConstructorDeclaration(decl)
-      ) {
+      // ArrowFunction / FunctionExpression / MethodDeclaration / FunctionDeclaration etc.
+      if (ts.isFunctionLike(decl as ts.Node)) {
         const sig = checker.getSignatureFromDeclaration(
-          decl as ts.SignatureDeclaration,
+          decl as unknown as ts.SignatureDeclaration,
         );
         if (sig) signature = checker.signatureToString(sig);
+        sigParts = getSigParts(decl as unknown as ts.SignatureDeclarationBase);
       }
     } catch {
       // ignore signature extraction failures
@@ -529,6 +562,8 @@ function buildActiveFileGraph(
       file: loc.fileName,
       range: loc.range,
       signature,
+      sig: sigParts,
+      ...(extra ?? {}),
     });
   };
 
@@ -615,6 +650,37 @@ function buildActiveFileGraph(
         }
       }
     }
+
+    // 4) interfaces / type aliases / enums (modeled under kind="interface" for the Interfaces filter)
+if (ts.isInterfaceDeclaration(node) && node.name) {
+  pushNode(node, "interface" as GraphNodeKind, node.name.text, {
+    subkind: "interface",
+    signature: `interface ${node.name.text}`,
+  });
+}
+
+if (ts.isTypeAliasDeclaration(node) && node.name) {
+  const name = node.name.text;
+  let rhs = "";
+  try {
+    rhs = node.type.getText(sf);
+  } catch {
+    rhs = "";
+  }
+  const short = rhs && rhs.length > 120 ? rhs.slice(0, 117) + "..." : rhs;
+  pushNode(node, "interface" as GraphNodeKind, name, {
+    subkind: "type",
+    signature: short ? `type ${name} = ${short}` : `type ${name}`,
+  });
+}
+
+if (ts.isEnumDeclaration(node) && node.name) {
+  const name = node.name.text;
+  pushNode(node, "interface" as GraphNodeKind, name, {
+    subkind: "enum",
+    signature: `enum ${name}`,
+  });
+}
 
     ts.forEachChild(node, visitDecls);
   };
