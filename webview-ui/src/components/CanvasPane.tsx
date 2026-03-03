@@ -104,6 +104,10 @@ function FileGroupNode({
 }) {
   return (
     <div className={["cgGroup", selected ? "cgGroup--selected" : ""].join(" ")}>
+      {/* ✅ Add handles so edges from/to file-group (top-level owner) can render */}
+      <Handle type="target" position={Position.Left} className="cgHandle" />
+      <Handle type="source" position={Position.Right} className="cgHandle" />
+
       <div className="cgGroupHeader">
         <div className="cgGroupTitle">{data.title}</div>
         <div className="cgGroupMeta">
@@ -114,7 +118,6 @@ function FileGroupNode({
     </div>
   );
 }
-
 const nodeTypes = { code: CodeNode, fileGroup: FileGroupNode };
 type DataflowEdgeData = { label?: string };
 
@@ -170,12 +173,10 @@ function toReactFlowEdges(graph?: GraphPayload): Array<Edge<DataflowEdgeData>> {
       id: e.id,
       source: e.source,
       target: e.target,
-      type: isDataflow ? "dataflow" : undefined,
+      type: isDataflow ? "dataflow" : undefined, // ✅ dataflow만 커스텀 엣지 사용
       markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
-      // Custom edge renderer reads label from `data.label`.
-      // For non-dataflow edges we still set `label` so the default edge can render it.
-      data: isDataflow ? { label } : undefined,
-      label: isDataflow ? undefined : label,
+      data: isDataflow ? { label } : undefined, // ✅ dataflow 라벨은 data.label로
+      label: isDataflow ? undefined : label, // ✅ 그 외 엣지는 기본 label로
     };
   });
 }

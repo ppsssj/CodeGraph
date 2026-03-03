@@ -746,20 +746,17 @@ function buildActiveFileGraph(
     p: ts.ParameterDeclaration,
     arg: ts.Expression,
   ) => {
+    const clampText = (s: string, max = 80) =>
+      s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+
     const rawName = p.name.getText(sf).replace(/\s+/g, " ").trim();
     const paramName = clampText(
       p.dotDotDotToken ? `...${rawName}` : rawName,
       60,
     );
 
-    // Keep the argument preview short and readable.
     const argText = clampText(arg.getText(sf).replace(/\s+/g, " ").trim(), 80);
 
-    // Desired format examples:
-    //   a ← 2
-    //   pad ← 4
-    //   xs ← ...nums
-    //   { id, name } ← u
     return `${paramName} ← ${argText}`;
   };
 
