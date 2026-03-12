@@ -72,6 +72,20 @@ function nodeTitle(n: GraphNode) {
   return n.name;
 }
 
+function getNodeToneClass(data: CodeNodeData): string {
+  if (data.kind === "class") return "cgNode--class";
+  if (data.kind === "function" || data.kind === "method") {
+    return "cgNode--function";
+  }
+  if (data.kind === "interface") {
+    if (data.subkind === "type") return "cgNode--type";
+    if (data.subkind === "enum") return "cgNode--enum";
+    return "cgNode--interface";
+  }
+  if (data.kind === "external") return "cgNode--external";
+  return "cgNode--default";
+}
+
 function CodeNode({
   data,
   selected,
@@ -90,6 +104,7 @@ function CodeNode({
     <div
       className={[
         "cgNode",
+        getNodeToneClass(data),
         selected || data.searchHit ? "cgNode--selected" : "",
       ].join(" ")}
     >
@@ -629,6 +644,9 @@ function toReactFlowNodes(
       id: parentId,
       type: "fileGroup",
       position: { x: gx, y: gy },
+      draggable: false,
+      selectable: false,
+      focusable: false,
       data: {
         title: baseName(g.file),
         subtitle: dirName(g.file),
@@ -890,6 +908,9 @@ export function CanvasPane({
               edges={edges}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
+              nodesDraggable={false}
+              panOnDrag
+              selectionOnDrag={false}
               onNodeClick={handleNodeClick}
               onPaneClick={onClearSelection}
               fitView

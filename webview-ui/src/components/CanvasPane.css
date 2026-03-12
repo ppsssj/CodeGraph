@@ -25,11 +25,23 @@
 
 /* ReactFlow node visuals (custom node content) */
 .cgNode {
+  --cg-node-accent: rgba(148, 163, 184, 0.55);
+  --cg-node-accent-strong: rgba(226, 232, 240, 0.95);
+  --cg-node-tint: rgba(15, 23, 42, 0.72);
+  --cg-node-glow: rgba(15, 23, 42, 0.24);
+  --cg-node-badge-bg: rgba(15, 23, 42, 0.65);
+  --cg-node-badge-text: rgba(226, 232, 240, 0.88);
+  --cg-node-subtext: rgba(226, 232, 240, 0.68);
   position: relative;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(2, 6, 23, 0.55);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--cg-node-accent);
+  border-left-width: 3px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
+    linear-gradient(135deg, var(--cg-node-tint), rgba(2, 6, 23, 0.82));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 36px var(--cg-node-glow);
   backdrop-filter: blur(8px);
   padding: 10px 12px;
   min-width: 190px;
@@ -37,8 +49,90 @@
   color: rgba(226, 232, 240, 0.92);
 }
 
+.cgNode::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--cg-node-accent);
+  opacity: 0.9;
+}
+
+.cgNode--default {
+  --cg-node-accent: rgba(148, 163, 184, 0.38);
+  --cg-node-accent-strong: rgba(226, 232, 240, 0.95);
+  --cg-node-tint: rgba(30, 41, 59, 0.72);
+  --cg-node-glow: rgba(15, 23, 42, 0.24);
+  --cg-node-badge-bg: rgba(30, 41, 59, 0.75);
+  --cg-node-badge-text: rgba(226, 232, 240, 0.88);
+}
+
+.cgNode--function {
+  --cg-node-accent: rgba(96, 165, 250, 0.62);
+  --cg-node-accent-strong: rgba(219, 234, 254, 0.96);
+  --cg-node-tint: rgba(30, 41, 59, 0.78);
+  --cg-node-glow: rgba(15, 23, 42, 0.18);
+  --cg-node-badge-bg: rgba(59, 130, 246, 0.2);
+  --cg-node-badge-text: rgba(219, 234, 254, 0.9);
+  --cg-node-subtext: rgba(191, 219, 254, 0.74);
+}
+
+.cgNode--class {
+  --cg-node-accent: rgba(250, 204, 21, 0.56);
+  --cg-node-accent-strong: rgba(254, 249, 195, 0.95);
+  --cg-node-tint: rgba(51, 65, 85, 0.78);
+  --cg-node-glow: rgba(15, 23, 42, 0.18);
+  --cg-node-badge-bg: rgba(234, 179, 8, 0.2);
+  --cg-node-badge-text: rgba(254, 249, 195, 0.9);
+  --cg-node-subtext: rgba(254, 240, 138, 0.74);
+}
+
+.cgNode--interface {
+  --cg-node-accent: rgba(52, 211, 153, 0.6);
+  --cg-node-accent-strong: rgba(220, 252, 231, 0.95);
+  --cg-node-tint: rgba(30, 41, 59, 0.78);
+  --cg-node-glow: rgba(15, 23, 42, 0.18);
+  --cg-node-badge-bg: rgba(16, 185, 129, 0.2);
+  --cg-node-badge-text: rgba(220, 252, 231, 0.9);
+  --cg-node-subtext: rgba(187, 247, 208, 0.74);
+}
+
+.cgNode--type {
+  --cg-node-accent: rgba(168, 85, 247, 0.58);
+  --cg-node-accent-strong: rgba(243, 232, 255, 0.95);
+  --cg-node-tint: rgba(30, 41, 59, 0.78);
+  --cg-node-glow: rgba(15, 23, 42, 0.18);
+  --cg-node-badge-bg: rgba(168, 85, 247, 0.2);
+  --cg-node-badge-text: rgba(243, 232, 255, 0.9);
+  --cg-node-subtext: rgba(233, 213, 255, 0.74);
+}
+
+.cgNode--enum {
+  --cg-node-accent: rgba(244, 114, 182, 0.54);
+  --cg-node-accent-strong: rgba(252, 231, 243, 0.95);
+  --cg-node-tint: rgba(30, 41, 59, 0.78);
+  --cg-node-glow: rgba(15, 23, 42, 0.18);
+  --cg-node-badge-bg: rgba(236, 72, 153, 0.2);
+  --cg-node-badge-text: rgba(252, 231, 243, 0.9);
+  --cg-node-subtext: rgba(251, 207, 232, 0.74);
+}
+
+.cgNode--external {
+  --cg-node-accent: rgba(248, 113, 113, 0.54);
+  --cg-node-accent-strong: rgba(254, 226, 226, 0.95);
+  --cg-node-tint: rgba(30, 41, 59, 0.78);
+  --cg-node-glow: rgba(15, 23, 42, 0.18);
+  --cg-node-badge-bg: rgba(239, 68, 68, 0.2);
+  --cg-node-badge-text: rgba(254, 226, 226, 0.9);
+  --cg-node-subtext: rgba(254, 202, 202, 0.74);
+}
+
 .cgNode--selected {
   border-color: rgba(56, 189, 248, 0.55);
+  border-left-color: rgba(56, 189, 248, 0.9);
   box-shadow:
     0 0 0 1px rgba(56, 189, 248, 0.22),
     0 16px 48px rgba(56, 189, 248, 0.10);
@@ -64,7 +158,7 @@
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.1px;
-  color: rgba(226, 232, 240, 0.95);
+  color: var(--cg-node-accent-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -75,15 +169,15 @@
   font-weight: 900;
   padding: 3px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(226, 232, 240, 0.14);
-  background: rgba(15, 23, 42, 0.65);
-  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid color-mix(in srgb, var(--cg-node-accent) 88%, transparent);
+  background: var(--cg-node-badge-bg);
+  color: var(--cg-node-badge-text);
   white-space: nowrap;
 }
 
 .cgNodeSub {
   font-size: 11px;
-  color: rgba(226, 232, 240, 0.6);
+  color: var(--cg-node-subtext);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
