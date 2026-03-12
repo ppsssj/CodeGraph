@@ -11,6 +11,7 @@ export class CodeGraphPanel {
   private lastTextEditor: vscode.TextEditor | undefined;
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
+  private suppressedAutoAnalysisUri: string | undefined;
 
   // cache workspace file list (ts/js)
   private cachedFilePaths: string[] = [];
@@ -95,6 +96,16 @@ export class CodeGraphPanel {
       }
       this.postActiveFile();
       void this.postWorkspaceFiles();
+
+      if (
+        editor &&
+        this.suppressedAutoAnalysisUri === editor.document.uri.toString()
+      ) {
+        this.suppressedAutoAnalysisUri = undefined;
+        return;
+      }
+
+      this.suppressedAutoAnalysisUri = undefined;
       scheduleAnalysis(0);
     });
 
@@ -395,6 +406,10 @@ export class CodeGraphPanel {
 
     try {
       const uri = vscode.Uri.file(filePath);
+      if (!preserveFocus) {
+        // Graph-click navigation should not replace the current graph via auto-analysis.
+        this.suppressedAutoAnalysisUri = uri.toString();
+      }
 
       // 1) 이미 화면에 떠 있는(visible) editor가 있으면 그 editor를 재사용
       const existingEditor = vscode.window.visibleTextEditors.find(
@@ -430,6 +445,7 @@ export class CodeGraphPanel {
         editor.revealRange(r, vscode.TextEditorRevealType.InCenter);
       }
     } catch (e) {
+      this.suppressedAutoAnalysisUri = undefined;
       console.error("[codegraph] openLocation error:", e);
       void vscode.window.showErrorMessage(
         `CodeGraph: Failed to open location: ${filePath}`,
