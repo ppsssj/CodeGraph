@@ -82,13 +82,13 @@
 }
 
 .cgNode--class {
-  --cg-node-accent: rgba(250, 204, 21, 0.56);
-  --cg-node-accent-strong: rgba(254, 249, 195, 0.95);
-  --cg-node-tint: rgba(51, 65, 85, 0.78);
+  --cg-node-accent: rgba(249, 115, 22, 0.58);
+  --cg-node-accent-strong: rgba(255, 237, 213, 0.95);
+  --cg-node-tint: rgba(30, 41, 59, 0.78);
   --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(234, 179, 8, 0.2);
-  --cg-node-badge-text: rgba(254, 249, 195, 0.9);
-  --cg-node-subtext: rgba(254, 240, 138, 0.74);
+  --cg-node-badge-bg: rgba(234, 88, 12, 0.2);
+  --cg-node-badge-text: rgba(255, 237, 213, 0.9);
+  --cg-node-subtext: rgba(254, 215, 170, 0.74);
 }
 
 .cgNode--interface {
