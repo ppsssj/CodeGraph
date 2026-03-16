@@ -17,6 +17,14 @@
 
 ---
 
+## Demo
+
+![Demo](assets/demo5.png)
+
+## Debug Walkthrough
+
+![Debug Walkthrough](assets/debug_demo.gif)
+
 ## Architecture Overview
 
 CodeGraph는 **VS Code Extension Host**(백엔드 역할)와 **Webview UI**(프론트 역할)로 구성됩니다.
@@ -193,16 +201,6 @@ type Graph = {
   }>;
 };
 ```
-
----
-
-## Screenshots
-
-| Demo                      | Debug                      |
-| ------------------------- | ------------------------------ |
-| ![Demo](assets/demo5.png) | ![Inspector](assets/debug_demo.gif) |
-
-<!-- > `assets/` 아래에 스크린샷을 추가해 주세요. -->
 
 ---
 
