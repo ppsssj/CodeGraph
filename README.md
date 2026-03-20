@@ -29,9 +29,17 @@ It is split into two parts:
 
 ![Demo](assets/demo5.png)
 
+## Node Click Walkthrough
+
+![Node Click Walkthrough](assets/NodeClick_demo.gif)
+
 ## Debug Walkthrough
 
 ![Debug Walkthrough](assets/debug_demo.gif)
+
+## Diagnostics Demo
+
+![Diagnostics Demo](assets/error_demo.png)
 
 ---
 
