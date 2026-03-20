@@ -1,2 +1,49 @@
 /* AnalysisPanel currently uses shared panel/list/tag styles + inline styles.
    Keep this file for future component-specific overrides. */
+
+.analysisInteractiveRow {
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.analysisInteractiveRow:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.analysisInteractiveRow:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+
+.analysisInteractiveButton {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.analysisInteractiveButton:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.analysisInteractivePrimary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysisInteractiveMeta {
+  opacity: 0.72;
+  margin-left: 12px;
+  flex: 0 0 auto;
+}

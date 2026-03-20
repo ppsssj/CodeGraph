@@ -1,6 +1,11 @@
 // import "./../App.css";
 import { ArrowDownLeft, ArrowUpRight, Sigma, Network } from "lucide-react";
-import type { ExtToWebviewMessage } from "../lib/vscode";
+import type {
+  CodeDiagnostic,
+  ExtToWebviewMessage,
+  GraphNode,
+  GraphPayload,
+} from "../lib/vscode";
 import "./AnalysisPanel.css";
 type AnalysisPayload = Extract<
   ExtToWebviewMessage,
@@ -9,7 +14,11 @@ type AnalysisPayload = Extract<
 
 type Props = {
   analysis: AnalysisPayload;
+  graph?: GraphPayload;
   className?: string;
+  onOpenDiagnostic?: (diagnostic: CodeDiagnostic) => void;
+  onSelectGraphNode?: (nodeId: string) => void;
+  onActivateGraphNode?: (nodeId: string) => void;
 };
 
 type CallV1 = { name: string; count: number };
@@ -33,7 +42,191 @@ function shortFile(p: string) {
   return parts[parts.length - 1] || p;
 }
 
-export function AnalysisPanel({ analysis, className }: Props) {
+function normalizePath(p: string) {
+  return p.replace(/\\/g, "/");
+}
+
+function comparePos(
+  a: { line: number; character: number },
+  b: { line: number; character: number },
+) {
+  if (a.line !== b.line) return a.line - b.line;
+  return a.character - b.character;
+}
+
+function rangeSize(range: GraphNode["range"]) {
+  return (
+    (range.end.line - range.start.line) * 1_000_000 +
+    (range.end.character - range.start.character)
+  );
+}
+
+function rangesOverlap(
+  a: GraphNode["range"],
+  b: NonNullable<CodeDiagnostic["range"]>,
+) {
+  return comparePos(a.start, b.end) <= 0 && comparePos(b.start, a.end) <= 0;
+}
+
+function distanceToRange(
+  pos: { line: number; character: number },
+  range: GraphNode["range"],
+) {
+  if (comparePos(pos, range.start) < 0) {
+    return (
+      (range.start.line - pos.line) * 1_000_000 +
+      (range.start.character - pos.character)
+    );
+  }
+  if (comparePos(pos, range.end) > 0) {
+    return (
+      (pos.line - range.end.line) * 1_000_000 +
+      (pos.character - range.end.character)
+    );
+  }
+  return 0;
+}
+
+function stripNodeDisplayMeta(name: string) {
+  return name.replace(/\s+\([^)]*\)(?:\s+\[lib\])?$/, "").trim();
+}
+
+function stripCtorPrefix(name: string) {
+  return name.replace(/^new\s+/, "").trim();
+}
+
+function uniqueNames(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function nameMatchScore(node: GraphNode, preferredNames: string[]) {
+  if (!preferredNames.length) return 0;
+
+  const rawName = node.name.trim();
+  const cleanName = stripNodeDisplayMeta(rawName);
+  const cleanNoCtor = stripCtorPrefix(cleanName);
+
+  let best = 0;
+  for (const preferred of preferredNames) {
+    const cleanPreferred = stripCtorPrefix(preferred);
+
+    if (cleanName === preferred || cleanNoCtor === cleanPreferred) {
+      best = Math.max(best, 120);
+      continue;
+    }
+    if (
+      cleanName === `new ${cleanPreferred}` ||
+      cleanPreferred === `new ${cleanNoCtor}`
+    ) {
+      best = Math.max(best, 115);
+      continue;
+    }
+    if (cleanName.endsWith(`.${cleanPreferred}`)) {
+      best = Math.max(best, 100);
+      continue;
+    }
+    if (cleanNoCtor.endsWith(`.${cleanPreferred}`)) {
+      best = Math.max(best, 96);
+      continue;
+    }
+    if (rawName.startsWith(`${preferred} (`) || rawName.startsWith(`new ${preferred} (`)) {
+      best = Math.max(best, 108);
+      continue;
+    }
+    if (cleanName.includes(cleanPreferred) || cleanNoCtor.includes(cleanPreferred)) {
+      best = Math.max(best, 72);
+    }
+  }
+
+  return best;
+}
+
+function findBestNodeByLocation(
+  graph: GraphPayload | undefined,
+  filePath: string,
+  range?: CodeDiagnostic["range"] | CallV2["declRange"],
+  preferredNames: string[] = [],
+) {
+  if (!graph) return null;
+
+  const fileCandidates = graph.nodes.filter(
+    (node) =>
+      node.kind !== "file" && normalizePath(node.file) === normalizePath(filePath),
+  );
+  if (!fileCandidates.length) return null;
+
+  const candidates = [...fileCandidates];
+  candidates.sort((a, b) => {
+    const nameScoreDiff = nameMatchScore(b, preferredNames) - nameMatchScore(a, preferredNames);
+    if (nameScoreDiff !== 0) return nameScoreDiff;
+
+    if (range) {
+      const aOverlap = rangesOverlap(a.range, range);
+      const bOverlap = rangesOverlap(b.range, range);
+      if (aOverlap !== bOverlap) return aOverlap ? -1 : 1;
+
+      const aDistance = distanceToRange(range.start, a.range);
+      const bDistance = distanceToRange(range.start, b.range);
+      if (aDistance !== bDistance) return aDistance - bDistance;
+    }
+
+    const aIsExternal = a.kind === "external";
+    const bIsExternal = b.kind === "external";
+    if (aIsExternal !== bIsExternal) return aIsExternal ? 1 : -1;
+
+    return rangeSize(a.range) - rangeSize(b.range);
+  });
+
+  return candidates[0] ?? null;
+}
+
+function findBestNodeByNames(
+  graph: GraphPayload | undefined,
+  preferredNames: string[],
+) {
+  if (!graph || preferredNames.length === 0) return null;
+
+  const ranked = graph.nodes
+    .filter((node) => node.kind !== "file")
+    .map((node) => ({ node, score: nameMatchScore(node, preferredNames) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      if ((a.node.kind === "external") !== (b.node.kind === "external")) {
+        return a.node.kind === "external" ? -1 : 1;
+      }
+      return rangeSize(a.node.range) - rangeSize(b.node.range);
+    });
+
+  return ranked[0]?.node ?? null;
+}
+
+function candidateNamesFromImport(source: string, specifiers: string[]) {
+  const names: string[] = [];
+  for (const specifier of specifiers) {
+    const parts = specifier.split(/\s+as\s+/i).map((part) => part.trim());
+    names.push(...parts);
+  }
+
+  const sourceBase = source.split("/").pop()?.replace(/\.[^.]+$/, "");
+  if (sourceBase) names.push(sourceBase);
+
+  return uniqueNames(names);
+}
+
+function candidateNamesFromCall(call: CallV1 | CallV2) {
+  const raw = isCallV2(call) ? call.calleeName : call.name;
+  return uniqueNames([raw, stripCtorPrefix(raw)]);
+}
+
+export function AnalysisPanel({
+  analysis,
+  graph,
+  className,
+  onOpenDiagnostic,
+  onSelectGraphNode,
+  onActivateGraphNode,
+}: Props) {
   if (!analysis) {
     return (
       <div className={className ? `panel ${className}` : "panel"}>
@@ -51,6 +244,15 @@ export function AnalysisPanel({ analysis, className }: Props) {
 
   const nodesLen = analysis.graph?.nodes?.length ?? 0;
   const edgesLen = analysis.graph?.edges?.length ?? 0;
+  const diagnostics = analysis.diagnostics ?? [];
+  const graphNodes = (graph ?? analysis.graph)?.nodes?.filter((node) => node.kind !== "file") ?? [];
+  const activateNode = (nodeId: string) => {
+    if (onActivateGraphNode) {
+      onActivateGraphNode(nodeId);
+      return;
+    }
+    onSelectGraphNode?.(nodeId);
+  };
 
   return (
     <div className={className ? `panel ${className}` : "panel"}>
@@ -62,13 +264,95 @@ export function AnalysisPanel({ analysis, className }: Props) {
       </div>
 
       <div className="panelBody" style={{ gap: 14 }}>
+        <Section
+          title={`Diagnostics (${diagnostics.length})`}
+          icon={<Network className="icon" />}
+        >
+          {diagnostics.length === 0 ? (
+            <div className="mutedText">No TypeScript diagnostics detected.</div>
+          ) : (
+            <div className="kvList">
+              {diagnostics.slice(0, 12).map((diag, idx) => {
+                const location = diag.filePath && diag.range
+                  ? `${shortFile(diag.filePath)}:${diag.range.start.line + 1}:${diag.range.start.character + 1}`
+                  : diag.filePath
+                    ? shortFile(diag.filePath)
+                    : "workspace";
+
+                return (
+                  <div
+                    className={[
+                      "kvRow",
+                      diag.filePath && diag.range ? "analysisInteractiveRow" : "",
+                    ].join(" ")}
+                    key={`${diag.code}-${location}-${idx}`}
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                    onClick={() => {
+                      if (diag.filePath && diag.range) {
+                        const targetNode = findBestNodeByLocation(
+                          graph,
+                          diag.filePath,
+                          diag.range,
+                        );
+                        if (targetNode) activateNode(targetNode.id);
+                        onOpenDiagnostic?.(diag);
+                      }
+                    }}
+                    role={diag.filePath && diag.range ? "button" : undefined}
+                    tabIndex={diag.filePath && diag.range ? 0 : undefined}
+                    onKeyDown={(event) => {
+                      if (
+                        diag.filePath &&
+                        diag.range &&
+                        (event.key === "Enter" || event.key === " ")
+                      ) {
+                        event.preventDefault();
+                        const targetNode = findBestNodeByLocation(
+                          graph,
+                          diag.filePath,
+                          diag.range,
+                        );
+                        if (targetNode) activateNode(targetNode.id);
+                        onOpenDiagnostic?.(diag);
+                      }
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        width: "100%",
+                      }}
+                    >
+                      <span className="mono" style={{ opacity: 0.95 }}>
+                        TS{diag.code}
+                      </span>
+                      <span className="mono" style={{ opacity: 0.72 }}>
+                        {diag.severity.toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="mutedText" title={diag.message}>
+                      {diag.message}
+                    </div>
+                    <div className="mutedText mono" title={location}>
+                      {location}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+
         {/* Graph */}
         <Section
           title={`Graph (${nodesLen} nodes · ${edgesLen} edges)`}
           icon={<Network className="icon" />}
         >
           {analysis.graph ? (
-            <div className="kvList">
+            <div className="kvList" style={{ gap: 8 }}>
               <div className="kvRow">
                 <div className="kvKey mono">nodes</div>
                 <div className="kvVal mono">{nodesLen}</div>
@@ -77,6 +361,21 @@ export function AnalysisPanel({ analysis, className }: Props) {
                 <div className="kvKey mono">edges</div>
                 <div className="kvVal mono">{edgesLen}</div>
               </div>
+              {graphNodes.slice(0, 12).map((node) => (
+                <button
+                  key={node.id}
+                  className="analysisInteractiveRow analysisInteractiveButton"
+                  type="button"
+                  onClick={() => activateNode(node.id)}
+                >
+                  <span className="mono analysisInteractivePrimary" title={node.name}>
+                    {node.name}
+                  </span>
+                  <span className="mono analysisInteractiveMeta">
+                    {node.kind}
+                  </span>
+                </button>
+              ))}
             </div>
           ) : (
             <div className="mutedText">
@@ -94,18 +393,35 @@ export function AnalysisPanel({ analysis, className }: Props) {
             <div className="mutedText">No imports detected.</div>
           ) : (
             <div className="kvList">
-              {analysis.imports.slice(0, 30).map((imp, idx) => (
-                <div className="kvRow" key={`${imp.source}-${idx}`}>
-                  <div className="kvKey mono">{imp.source}</div>
-                  <div className="kvVal mono">
-                    {imp.kind === "side-effect"
-                      ? "(side-effect)"
-                      : imp.specifiers.length
-                        ? imp.specifiers.join(", ")
-                        : "(none)"}
-                  </div>
-                </div>
-              ))}
+              {analysis.imports.slice(0, 30).map((imp, idx) => {
+                const targetNode = findBestNodeByNames(
+                  graph,
+                  candidateNamesFromImport(imp.source, imp.specifiers),
+                );
+                return (
+                  <button
+                    className={[
+                      "analysisInteractiveButton",
+                      targetNode ? "analysisInteractiveRow" : "",
+                    ].join(" ")}
+                    type="button"
+                    key={`${imp.source}-${idx}`}
+                    onClick={() => {
+                      if (targetNode) activateNode(targetNode.id);
+                    }}
+                    disabled={!targetNode}
+                  >
+                    <div className="kvKey mono">{imp.source}</div>
+                    <div className="kvVal mono">
+                      {imp.kind === "side-effect"
+                        ? "(side-effect)"
+                        : imp.specifiers.length
+                          ? imp.specifiers.join(", ")
+                          : "(none)"}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </Section>
@@ -166,12 +482,43 @@ export function AnalysisPanel({ analysis, className }: Props) {
 
                 return (
                   <div
-                    className="kvRow"
+                    className={[
+                      "kvRow",
+                      isCallV2(c) && c.declFile ? "analysisInteractiveRow" : "",
+                    ].join(" ")}
                     key={key}
                     style={{
                       display: "flex",
                       flexDirection: "column",
                       gap: 4,
+                    }}
+                    onClick={() => {
+                      if (!isCallV2(c)) return;
+                      const targetNode = c.declFile
+                        ? findBestNodeByLocation(
+                            graph,
+                            c.declFile,
+                            c.declRange,
+                            candidateNamesFromCall(c),
+                          )
+                        : findBestNodeByNames(graph, candidateNamesFromCall(c));
+                      if (targetNode) activateNode(targetNode.id);
+                    }}
+                    role={isCallV2(c) ? "button" : undefined}
+                    tabIndex={isCallV2(c) ? 0 : undefined}
+                    onKeyDown={(event) => {
+                      if (!isCallV2(c)) return;
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      const targetNode = c.declFile
+                        ? findBestNodeByLocation(
+                            graph,
+                            c.declFile,
+                            c.declRange,
+                            candidateNamesFromCall(c),
+                          )
+                        : findBestNodeByNames(graph, candidateNamesFromCall(c));
+                      if (targetNode) activateNode(targetNode.id);
                     }}
                   >
                     <div

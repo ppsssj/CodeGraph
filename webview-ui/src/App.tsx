@@ -1,10 +1,12 @@
 import {
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { toJpeg } from "html-to-image";
 import { Topbar } from "./components/Topbar";
 import { FiltersBar, type ChipKey } from "./components/FiltersBar";
 import { CanvasPane } from "./components/CanvasPane";
@@ -13,9 +15,11 @@ import {
   getVSCodeApi,
   isExtToWebviewMessage,
   type ExtToWebviewMessage,
+  type CodeDiagnostic,
   type GraphNode,
   type GraphPayload,
   type GraphTraceEvent,
+  type UINotice,
 } from "./lib/vscode";
 import "./styles/index.css";
 
@@ -37,6 +41,11 @@ type AnalysisPayload = Extract<
   ExtToWebviewMessage,
   { type: "analysisResult" }
 >["payload"];
+type FlowExportResultPayload = Extract<
+  ExtToWebviewMessage,
+  { type: "flowExportResult" }
+>["payload"];
+type NoticeSeverity = UINotice["severity"];
 
 function findNodeById(graph: GraphPayload | undefined, id: string | null) {
   if (!graph || !id) return null;
@@ -155,6 +164,33 @@ function buildTracePreviewTarget(
   };
 }
 
+function summarizeDiagnostics(diagnostics: CodeDiagnostic[]): UINotice | null {
+  if (!diagnostics.length) return null;
+
+  const errorCount = diagnostics.filter((d) => d.severity === "error").length;
+  const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
+  const top = diagnostics[0];
+  const labelParts: string[] = [];
+  if (errorCount) labelParts.push(`${errorCount} error${errorCount > 1 ? "s" : ""}`);
+  if (warningCount) {
+    labelParts.push(`${warningCount} warning${warningCount > 1 ? "s" : ""}`);
+  }
+  if (!labelParts.length) {
+    labelParts.push(`${diagnostics.length} diagnostic${diagnostics.length > 1 ? "s" : ""}`);
+  }
+
+  return {
+    id: `diagnostics-${Date.now()}`,
+    scope: "canvas",
+    severity: errorCount > 0 ? "error" : warningCount > 0 ? "warning" : "info",
+    message: `TypeScript reported ${labelParts.join(" and ")}`,
+    detail: top.filePath
+      ? `${shortBaseName(top.filePath)} · TS${top.code}: ${top.message}`
+      : `TS${top.code}: ${top.message}`,
+    source: "typescript-diagnostics",
+  };
+}
+
 /** Pick the most specific node that contains selection.start (same file, smallest range). */
 function pickRootNodeFromSelection(
   graph: GraphPayload,
@@ -187,9 +223,8 @@ function pickRootNodeFromSelection(
   return best?.id ?? null;
 }
 
-function downloadJson(filename: string, data: unknown) {
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+function downloadText(filename: string, text: string, type: string) {
+  const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
@@ -204,10 +239,40 @@ function downloadJson(filename: string, data: unknown) {
   URL.revokeObjectURL(url);
 }
 
-type ToastKind = "info" | "success" | "error";
+function downloadDataUrl(filename: string, dataUrl: string) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function dataUrlToBase64(dataUrl: string) {
+  const [, base64 = ""] = dataUrl.split(",", 2);
+  return base64;
+}
+
+function isHostedInVSCode() {
+  return typeof window.acquireVsCodeApi === "function";
+}
+
+type ToastKind = "info" | "success" | "warning" | "error";
 type ToastState = { open: boolean; kind: ToastKind; message: string };
 type InspectorPlacement = "auto" | "right" | "bottom";
 type EffectiveInspectorPlacement = Exclude<InspectorPlacement, "auto">;
+type ExportFormat = "json" | "jpg";
+type FocusedFlowState = {
+  edgeId: string;
+  sourceId: string;
+  targetId: string;
+};
+type InspectorFocusRequest = {
+  nodeId: string;
+  token: number;
+};
 
 export default function App() {
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
@@ -231,6 +296,9 @@ export default function App() {
   const [fitViewTick, setFitViewTick] = useState(0);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [focusedFlow, setFocusedFlow] = useState<FocusedFlowState | null>(null);
+  const [inspectorFocusRequest, setInspectorFocusRequest] =
+    useState<InspectorFocusRequest | null>(null);
 
   const [pendingUseSelectionAsRoot, setPendingUseSelectionAsRoot] =
     useState(false);
@@ -283,17 +351,26 @@ export default function App() {
   });
   const [isResizingInspector, setIsResizingInspector] = useState(false);
 
-  // Toast + download status
+  // Toast + export status
   const [toast, setToast] = useState<ToastState>({
     open: false,
     kind: "info",
     message: "",
   });
+  const [canvasNotice, setCanvasNotice] = useState<UINotice | null>(null);
+  const [inspectorNotice, setInspectorNotice] = useState<UINotice | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
-  const [downloadStatus, setDownloadStatus] = useState<
-    "idle" | "downloading" | "done"
-  >("idle");
+  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "done">(
+    "idle",
+  );
+  const [exportFormat, setExportFormat] = useState<ExportFormat | null>(null);
+
+  const finishExport = () => {
+    setExportStatus("done");
+    window.setTimeout(() => setExportStatus("idle"), 900);
+    setExportFormat(null);
+  };
 
   const showToast = (kind: ToastKind, message: string, ms = 1800) => {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -303,6 +380,44 @@ export default function App() {
       toastTimerRef.current = null;
     }, ms);
   };
+
+  const noticeSeverityToToastKind = (severity: NoticeSeverity): ToastKind => {
+    if (severity === "warning") return "warning";
+    if (severity === "error") return "error";
+    return "info";
+  };
+
+  const applyNotice = useEffectEvent((notice: UINotice) => {
+    if (notice.scope === "toast") {
+      const text = notice.detail
+        ? `${notice.message}: ${notice.detail}`
+        : notice.message;
+      showToast(noticeSeverityToToastKind(notice.severity), text, 2600);
+      return;
+    }
+
+    if (notice.scope === "canvas") {
+      setCanvasNotice(notice);
+      return;
+    }
+
+    setInspectorNotice(notice);
+  });
+
+  const handleFlowExportResult = useEffectEvent(
+    (result: FlowExportResultPayload) => {
+      if (result.ok) {
+        finishExport();
+        showToast("success", "Export complete", 1500);
+        return;
+      }
+
+      setExportStatus("idle");
+      setExportFormat(null);
+      if (result.canceled) return;
+      showToast("error", result.error || "Export failed");
+    },
+  );
 
   // Keep latest values for selection-root logic
   const pendingRootRef = useRef(false);
@@ -357,7 +472,29 @@ export default function App() {
         const g = graphRef.current;
 
         if (pending && msg.payload && g) {
-          setRootNodeId(pickRootNodeFromSelection(g, msg.payload));
+          const nextRootId = pickRootNodeFromSelection(g, msg.payload);
+          setRootNodeId(nextRootId);
+          if (nextRootId) {
+            setInspectorNotice(null);
+          } else {
+            setInspectorNotice({
+              id: `root-${Date.now()}`,
+              scope: "inspector",
+              severity: "warning",
+              message: "Could not derive a root from the current selection",
+              detail: "Try selecting inside a function, method, or class body.",
+              source: "selection-root",
+            });
+          }
+        } else if (pending && !msg.payload) {
+          setInspectorNotice({
+            id: `selection-${Date.now()}`,
+            scope: "inspector",
+            severity: "warning",
+            message: "Selection is not available",
+            detail: "Focus a code editor and try selecting a symbol again.",
+            source: "selection-root",
+          });
         }
 
         if (pending) {
@@ -367,11 +504,24 @@ export default function App() {
         return;
       }
 
+      if (msg.type === "uiNotice") {
+        applyNotice(msg.payload);
+        return;
+      }
+
+      if (msg.type === "flowExportResult") {
+        handleFlowExportResult(msg.payload);
+        return;
+      }
+
       if (msg.type === "analysisResult") {
         setAnalysis(msg.payload);
 
         const g = msg.payload?.graph;
         const trace = msg.payload?.trace;
+        const diagnosticsNotice = msg.payload?.diagnostics
+          ? summarizeDiagnostics(msg.payload.diagnostics)
+          : null;
         if (trace && trace.length > 0) {
           const maxEvents = 800;
           const events = trace.slice(0, maxEvents);
@@ -380,11 +530,13 @@ export default function App() {
           setGraphState(undefined);
           setSelectedNodeId(null);
           setRootNodeId(null);
+          setCanvasNotice(diagnosticsNotice);
           showToast("info", `Trace ready: 0 / ${events.length}`, 1500);
         } else if (g) {
           setTraceEvents(null);
           setTraceCursor(0);
           setGraphState((prev) => mergeGraph(prev, g));
+          setCanvasNotice(diagnosticsNotice);
         }
 
         if (!msg.payload) {
@@ -394,6 +546,7 @@ export default function App() {
           expandedFilesRef.current.clear();
           setSelectedNodeId(null);
           setRootNodeId(null);
+          setCanvasNotice(null);
         }
       }
     };
@@ -504,7 +657,7 @@ export default function App() {
 
   const graph = graphState;
   const hasGraphData = Boolean(graph && graph.nodes.length > 0);
-  const downloadEnabled = hasGraphData && downloadStatus !== "downloading";
+  const exportEnabled = hasGraphData && exportStatus !== "exporting";
   const traceFocusEvent =
     traceEvents && traceCursor > 0 ? traceEvents[traceCursor - 1] : null;
   const tracePreviewTarget = useMemo(
@@ -524,6 +677,8 @@ export default function App() {
   }, [graph, selectedNodeId]);
 
   const projectName = activeFile?.fileName ? activeFile.fileName : "Select file";
+  const exportBaseName =
+    activeFile?.fileName?.replace(/[^\w.-]+/g, "_")?.slice(0, 64) || "codegraph";
 
   const resetGraph = () => {
     setTraceEvents(null);
@@ -531,7 +686,10 @@ export default function App() {
     setGraphState(undefined);
     expandedFilesRef.current.clear();
     setSelectedNodeId(null);
+    setFocusedFlow(null);
+    setInspectorFocusRequest(null);
     setRootNodeId(null);
+    setInspectorNotice(null);
   };
 
   const stepTraceTo = (nextCursor: number) => {
@@ -572,61 +730,202 @@ export default function App() {
     vscode.postMessage({ type: "expandNode", payload: { filePath } });
   };
 
-  const downloadFlow = async () => {
-    if (!hasGraphData || !graph) {
-      showToast("info", "No graph to download");
+  const openDiagnostic = (diagnostic: CodeDiagnostic) => {
+    if (!diagnostic.filePath) return;
+    vscode.postMessage({
+      type: "openLocation",
+      payload: {
+        filePath: diagnostic.filePath,
+        range: diagnostic.range,
+        preserveFocus: false,
+      },
+    });
+  };
+
+  const activateGraphNode = (nodeId: string) => {
+    setFocusedFlow(null);
+    setSelectedNodeId(nodeId);
+    setInspectorFocusRequest({ nodeId, token: Date.now() });
+    const targetNode = findNodeById(graph, nodeId);
+    if (!targetNode) return;
+    vscode.postMessage({
+      type: "openLocation",
+      payload: {
+        filePath: targetNode.file,
+        range: targetNode.range,
+        preserveFocus: false,
+      },
+    });
+  };
+
+  const focusParamFlow = (flow: FocusedFlowState) => {
+    setFocusedFlow(flow);
+  };
+
+  const buildFlowExportPayload = () => ({
+    schema: "codegraph.flow.v1",
+    exportedAt: new Date().toISOString(),
+    ui: {
+      activeFilter: activeChip,
+      searchQuery,
+      rootNodeId,
+      selectedNodeId,
+      inspector: {
+        open: inspectorOpen,
+        placement: inspectorPlacement,
+        effectivePlacement: effectiveInspectorPlacement,
+        width: inspectorWidth,
+        height: inspectorHeight,
+      },
+    },
+    activeFile: activeFile
+      ? {
+          uri: activeFile.uri,
+          fileName: activeFile.fileName,
+          languageId: activeFile.languageId,
+        }
+      : null,
+    analysisMeta: analysis?.meta ?? null,
+    graph,
+  });
+
+  const saveExportText = (
+    suggestedFileName: string,
+    text: string,
+    title: string,
+    saveLabel: string,
+    filters: Record<string, string[]>,
+  ) => {
+    if (isHostedInVSCode()) {
+      vscode.postMessage({
+        type: "saveExportFile",
+        payload: {
+          suggestedFileName,
+          content: { kind: "text", text },
+          title,
+          saveLabel,
+          filters,
+        },
+      });
       return;
     }
-    if (downloadStatus === "downloading") return;
+
+    downloadText(suggestedFileName, text, "application/json;charset=utf-8");
+    finishExport();
+    showToast("success", "Export complete", 1500);
+  };
+
+  const saveExportDataUrl = (
+    suggestedFileName: string,
+    dataUrl: string,
+    title: string,
+    saveLabel: string,
+    filters: Record<string, string[]>,
+  ) => {
+    if (isHostedInVSCode()) {
+      vscode.postMessage({
+        type: "saveExportFile",
+        payload: {
+          suggestedFileName,
+          content: { kind: "base64", base64: dataUrlToBase64(dataUrl) },
+          title,
+          saveLabel,
+          filters,
+        },
+      });
+      return;
+    }
+
+    downloadDataUrl(suggestedFileName, dataUrl);
+    finishExport();
+    showToast("success", "Export complete", 1500);
+  };
+
+  const exportGraphAsJson = async () => {
+    if (!hasGraphData || !graph) {
+      showToast("info", "No graph to export");
+      return;
+    }
+    if (exportStatus === "exporting") return;
 
     try {
-      setDownloadStatus("downloading");
-      showToast("info", "Downloading…", 1200);
+      setExportStatus("exporting");
+      setExportFormat("json");
+      showToast("info", "Preparing JSON export...", 1200);
 
       await new Promise((r) => setTimeout(r, 0));
 
       const exportedAt = new Date().toISOString().replace(/[:.]/g, "-");
-      const base =
-        activeFile?.fileName?.replace(/[^\w.-]+/g, "_")?.slice(0, 64) ||
-        "codegraph";
+      const suggestedFileName = `${exportBaseName}.flow.${exportedAt}.json`;
+      const text = JSON.stringify(buildFlowExportPayload(), null, 2);
 
-      const payload = {
-        schema: "codegraph.flow.v1",
-        exportedAt: new Date().toISOString(),
-        ui: {
-          activeFilter: activeChip,
-          searchQuery,
-            rootNodeId,
-            selectedNodeId,
-            inspector: {
-              open: inspectorOpen,
-              placement: inspectorPlacement,
-              effectivePlacement: effectiveInspectorPlacement,
-              width: inspectorWidth,
-              height: inspectorHeight,
-            },
-          },
-        activeFile: activeFile
-          ? {
-              uri: activeFile.uri,
-              fileName: activeFile.fileName,
-              languageId: activeFile.languageId,
-            }
-          : null,
-        analysisMeta: analysis?.meta ?? null,
-        graph,
-      };
-
-      downloadJson(`${base}.flow.${exportedAt}.json`, payload);
-
-      setDownloadStatus("done");
-      showToast("success", "Download complete", 1500);
-
-      window.setTimeout(() => setDownloadStatus("idle"), 900);
+      saveExportText(
+        suggestedFileName,
+        text,
+        "Save CodeGraph JSON Export",
+        "Save JSON Export",
+        { "JSON Files": ["json"] },
+      );
     } catch (e) {
-      console.error("[codegraph] downloadFlow error:", e);
-      setDownloadStatus("idle");
-      showToast("error", "Download failed");
+      console.error("[codegraph] exportGraphAsJson error:", e);
+      setExportStatus("idle");
+      setExportFormat(null);
+      showToast("error", "JSON export failed");
+    }
+  };
+
+  const exportGraphAsJpg = async () => {
+    if (!hasGraphData) {
+      showToast("info", "No graph to export");
+      return;
+    }
+    if (exportStatus === "exporting") return;
+
+    try {
+      setExportStatus("exporting");
+      setExportFormat("jpg");
+      showToast("info", "Preparing JPG snapshot...", 1200);
+
+      await new Promise((r) => setTimeout(r, 0));
+
+      const canvasRoot = appRootRef.current?.querySelector(
+        ".canvasFlow .react-flow",
+      ) as HTMLElement | null;
+      if (!canvasRoot) {
+        throw new Error("Graph canvas is not ready");
+      }
+
+      const dataUrl = await toJpeg(canvasRoot, {
+        cacheBust: true,
+        pixelRatio: 2,
+        quality: 0.94,
+        backgroundColor: "#081226",
+        filter: (node) => {
+          if (!(node instanceof HTMLElement)) return true;
+          return !(
+            node.classList.contains("canvasControls") ||
+            node.classList.contains("selectionBanner") ||
+            node.classList.contains("rootBanner") ||
+            node.classList.contains("canvasNotice")
+          );
+        },
+      });
+
+      const exportedAt = new Date().toISOString().replace(/[:.]/g, "-");
+      const suggestedFileName = `${exportBaseName}.flow.${exportedAt}.jpg`;
+
+      saveExportDataUrl(
+        suggestedFileName,
+        dataUrl,
+        "Save CodeGraph JPG Export",
+        "Save JPG Export",
+        { "JPEG Images": ["jpg", "jpeg"] },
+      );
+    } catch (e) {
+      console.error("[codegraph] exportGraphAsJpg error:", e);
+      setExportStatus("idle");
+      setExportFormat(null);
+      showToast("error", "JPG export failed");
     }
   };
 
@@ -673,9 +972,11 @@ export default function App() {
         onFitToScreen={() => setFitViewTick((v) => v + 1)}
         traceMode={traceMode}
         onToggleTraceMode={toggleTraceMode}
-        onDownloadFlow={downloadFlow}
-        downloadEnabled={downloadEnabled}
-        downloadStatus={downloadStatus}
+        onExportJson={exportGraphAsJson}
+        onExportJpg={exportGraphAsJpg}
+        exportEnabled={exportEnabled}
+        exportStatus={exportStatus}
+        exportFormat={exportFormat}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
       />
@@ -696,8 +997,14 @@ export default function App() {
           searchQuery={searchQuery}
           rootNodeId={rootNodeId}
           selectedNodeId={selectedNodeId}
-          onSelectNode={setSelectedNodeId}
-          onClearSelection={() => setSelectedNodeId(null)}
+          onSelectNode={(nodeId) => {
+            setFocusedFlow(null);
+            setSelectedNodeId(nodeId);
+          }}
+          onClearSelection={() => {
+            setSelectedNodeId(null);
+            setFocusedFlow(null);
+          }}
           // ✅ 노드 클릭 → 코드 위치 이동 복구
           onOpenNode={(n) => {
             vscode.postMessage({
@@ -719,8 +1026,18 @@ export default function App() {
             setPendingUseSelectionAsRoot(true);
             vscode.postMessage({ type: "requestSelection" });
           }}
-          onClearRoot={() => setRootNodeId(null)}
+          onClearRoot={() => {
+            setRootNodeId(null);
+            setInspectorNotice(null);
+          }}
           onExpandExternal={expandExternalFile}
+          analysisDiagnostics={analysis?.diagnostics ?? []}
+          highlightedNodeIds={
+            focusedFlow ? [focusedFlow.sourceId, focusedFlow.targetId] : []
+          }
+          highlightedEdgeId={focusedFlow?.edgeId ?? null}
+          inspectorFocusRequest={inspectorFocusRequest}
+          notice={canvasNotice}
           traceVisible={Boolean(traceEvents && traceEvents.length > 0)}
           traceCursor={traceCursor}
           traceTotal={traceEvents?.length ?? 0}
@@ -763,13 +1080,21 @@ export default function App() {
           analysis={analysis}
           graph={graph}
           selectedNode={selectedNode}
+          notice={inspectorNotice}
+          onOpenDiagnostic={openDiagnostic}
+          onSelectGraphNode={setSelectedNodeId}
+          onActivateGraphNode={activateGraphNode}
+          onFocusParamFlow={focusParamFlow}
           onRefreshActive={() =>
             vscode.postMessage({ type: "requestActiveFile" })
           }
           onResetGraph={resetGraph}
           onExpandExternal={expandExternalFile}
           rootNode={findNodeById(graph, rootNodeId)}
-          onClearRoot={() => setRootNodeId(null)}
+          onClearRoot={() => {
+            setRootNodeId(null);
+            setInspectorNotice(null);
+          }}
         />
       </div>
 

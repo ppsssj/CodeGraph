@@ -7,11 +7,14 @@
 // NOTE: Adjust the relative import path if your webview source lives in a different folder.
 
 export type {
+  CodeDiagnostic,
   WebviewToExtMessage,
   ExtToWebviewMessage,
+  GraphEdge,
   GraphNode,
   GraphPayload,
   GraphTraceEvent,
+  UINotice,
 } from "../../../src/shared/protocol";
 
 import type {
@@ -43,7 +46,6 @@ export function getVSCodeApi(): VSCodeApi {
   let __vscode_state: unknown = undefined;
   return {
     postMessage: (msg: WebviewToExtMessage) => {
-      // eslint-disable-next-line no-console
       console.debug("[vscode.postMessage - dev shim]", msg);
       try {
         window.dispatchEvent(new MessageEvent("message", { data: msg }));
@@ -65,6 +67,8 @@ export function isExtToWebviewMessage(x: unknown): x is ExtToWebviewMessage {
     t === "activeFile" ||
     t === "workspaceFiles" ||
     t === "selection" ||
-    t === "analysisResult"
+    t === "analysisResult" ||
+    t === "uiNotice" ||
+    t === "flowExportResult"
   );
 }

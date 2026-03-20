@@ -87,6 +87,10 @@ body.vscode-high-contrast .logoDark {
   min-width: 0;
 }
 
+.exportMenuWrap {
+  position: relative;
+}
+
 .projectPicker--open {
   border-color: var(--border);
 }
@@ -217,6 +221,48 @@ body.vscode-high-contrast .logoDark {
   color: var(--muted);
 }
 
+.exportMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 188px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 94%, black);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+
+.exportMenuItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--inputFg);
+  cursor: pointer;
+  text-align: left;
+}
+
+.exportMenuItem:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.exportMenuItemTitle {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.exportMenuItemMeta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .searchWrap {
   display: block;
   flex: 1 1 auto;
@@ -276,6 +322,11 @@ body.vscode-high-contrast .logoDark {
 
 .iconBtn--busy {
   opacity: 0.85;
+}
+
+.iconBtn--activeMenu {
+  border-color: var(--border);
+  background: rgba(19, 91, 236, 0.14);
 }
 
 .topbar--traceOn {

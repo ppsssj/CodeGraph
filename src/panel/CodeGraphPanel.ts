@@ -4,6 +4,7 @@ import { getWebviewHtml } from "../webview/html";
 import { analyzeWorkspaceActive } from "../analyzer";
 import type {
   ExtToWebviewMessage,
+  UINotice,
   WebviewToExtMessage,
 } from "../shared/protocol";
 
@@ -61,19 +62,23 @@ export class CodeGraphPanel {
         try {
           if (msg.type === "requestActiveFile") return this.postActiveFile();
           if (msg.type === "requestWorkspaceFiles")
-            return this.postWorkspaceFiles();
+            return await this.postWorkspaceFiles();
           if (msg.type === "requestSelection") return this.postSelection();
           if (msg.type === "analyzeActiveFile")
-            return this.postAnalysis(Boolean(msg.payload?.traceMode)); // workspace-aware
-          if (msg.type === "analyzeWorkspace") return this.postAnalysis(); // explicit
+            return await this.postAnalysis(Boolean(msg.payload?.traceMode)); // workspace-aware
+          if (msg.type === "analyzeWorkspace")
+            return await this.postAnalysis(); // explicit
           if (msg.type === "selectWorkspaceFile")
-            return this.selectWorkspaceFile(msg.payload.filePath);
+            return await this.selectWorkspaceFile(msg.payload.filePath);
           if (msg.type === "expandNode")
-            return this.postAnalysisForFile(msg.payload.filePath);
+            return await this.postAnalysisForFile(msg.payload.filePath);
+          if (msg.type === "saveExportFile")
+            return await this.saveExportFile(msg.payload);
           if (msg.type === "openLocation")
-            return this.openLocation(msg.payload);
+            return await this.openLocation(msg.payload);
         } catch (e) {
           console.error("[codegraph] onDidReceiveMessage error:", e);
+          this.handleRequestError(msg.type, e);
         }
       },
       undefined,
@@ -90,11 +95,16 @@ export class CodeGraphPanel {
       if (this.analysisTimer) clearTimeout(this.analysisTimer);
       this.analysisTimer = setTimeout(
         () => {
-          try {
-            void this.postAnalysis();
-          } catch (e) {
+          void this.postAnalysis().catch((e) => {
             console.error("[codegraph] auto-analysis error:", e);
-          }
+            this.postNotice(
+              "canvas",
+              "warning",
+              "Auto-analysis failed",
+              getErrorMessage(e),
+              "auto-analysis",
+            );
+          });
         },
         Math.max(0, delayMs),
       );
@@ -180,6 +190,54 @@ export class CodeGraphPanel {
   private invalidateAndPostWorkspaceFiles() {
     this.invalidateWorkspaceCache();
     void this.postWorkspaceFiles();
+  }
+
+  private postNotice(
+    scope: UINotice["scope"],
+    severity: UINotice["severity"],
+    message: string,
+    detail?: string,
+    source?: string,
+  ) {
+    this.panel.webview.postMessage({
+      type: "uiNotice",
+      payload: {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        scope,
+        severity,
+        message,
+        detail,
+        source,
+      },
+    } satisfies ExtToWebviewMessage);
+  }
+
+  private handleRequestError(action: WebviewToExtMessage["type"], error: unknown) {
+    const detail = getErrorMessage(error);
+
+    if (
+      action === "analyzeActiveFile" ||
+      action === "analyzeWorkspace" ||
+      action === "expandNode"
+    ) {
+      this.postNotice("canvas", "error", "Analysis failed", detail, action);
+      return;
+    }
+
+    if (action === "openLocation") {
+      this.postNotice("toast", "error", "Failed to open code location", detail, action);
+      return;
+    }
+
+    if (action === "saveExportFile") {
+      this.panel.webview.postMessage({
+        type: "flowExportResult",
+        payload: { ok: false, error: detail },
+      } satisfies ExtToWebviewMessage);
+      return;
+    }
+
+    this.postNotice("toast", "error", "Request failed", detail, action);
   }
 
   private getPreferredEditorColumn(): vscode.ViewColumn {
@@ -327,6 +385,7 @@ export class CodeGraphPanel {
       imports: result.imports,
       exports: result.exports,
       calls: result.calls,
+      diagnostics: result.diagnostics,
       graph: result.graph,
       trace: traceMode ? result.trace : undefined,
       meta: result.meta,
@@ -377,6 +436,7 @@ export class CodeGraphPanel {
       imports: result.imports,
       exports: result.exports,
       calls: result.calls,
+      diagnostics: result.diagnostics,
       graph: result.graph,
       meta: result.meta,
     };
@@ -404,6 +464,59 @@ export class CodeGraphPanel {
     this.postActiveFile();
     this.postSelection();
     await this.postAnalysis();
+  }
+
+  private async saveExportFile(payload: {
+    suggestedFileName: string;
+    content:
+      | {
+          kind: "text";
+          text: string;
+        }
+      | {
+          kind: "base64";
+          base64: string;
+        };
+    saveLabel: string;
+    title: string;
+    filters: Record<string, string[]>;
+  }) {
+    const editor = this.getEditor();
+    const workspaceRoot = this.getWorkspaceRoot();
+    const defaultDir =
+      workspaceRoot ??
+      (editor?.document.isUntitled ? undefined : path.dirname(editor?.document.fileName ?? ""));
+
+    const defaultUri = defaultDir
+      ? vscode.Uri.file(path.join(defaultDir, payload.suggestedFileName))
+      : undefined;
+
+    const targetUri = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: payload.filters,
+      saveLabel: payload.saveLabel,
+      title: payload.title,
+    });
+
+    if (!targetUri) {
+      this.panel.webview.postMessage({
+        type: "flowExportResult",
+        payload: { ok: false, canceled: true },
+      } satisfies ExtToWebviewMessage);
+      return;
+    }
+
+    const bytes =
+      payload.content.kind === "text"
+        ? new TextEncoder().encode(payload.content.text)
+        : decodeBase64(payload.content.base64);
+
+    await vscode.workspace.fs.writeFile(targetUri, bytes);
+
+    this.panel.webview.postMessage({
+      type: "flowExportResult",
+      payload: { ok: true, filePath: targetUri.fsPath },
+    } satisfies ExtToWebviewMessage);
   }
 
   private async openLocation(payload: {
@@ -461,8 +574,12 @@ export class CodeGraphPanel {
     } catch (e) {
       this.suppressedAutoAnalysisUri = undefined;
       console.error("[codegraph] openLocation error:", e);
-      void vscode.window.showErrorMessage(
-        `CodeGraph: Failed to open location: ${filePath}`,
+      this.postNotice(
+        "toast",
+        "error",
+        "Failed to open code location",
+        `${path.basename(filePath)}: ${getErrorMessage(e)}`,
+        "openLocation",
       );
     }
   }
@@ -482,6 +599,17 @@ export class CodeGraphPanel {
       this.traceHighlightTimer = undefined;
     }, 1200);
   }
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "Unknown error";
+}
+
+function decodeBase64(base64: string): Uint8Array {
+  const buffer = Buffer.from(base64, "base64");
+  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }
 
 function guessLanguageId(filePath: string): string {

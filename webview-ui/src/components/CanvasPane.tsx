@@ -25,7 +25,13 @@ import ReactFlow, {
 } from "reactflow";
 
 import { Crosshair, Network, Sigma, ZoomIn, ZoomOut } from "lucide-react";
-import type { GraphNode, GraphPayload, GraphTraceEvent } from "../lib/vscode";
+import type {
+  CodeDiagnostic,
+  GraphNode,
+  GraphPayload,
+  GraphTraceEvent,
+  UINotice,
+} from "../lib/vscode";
 import type { ChipKey } from "./FiltersBar";
 
 type InterfaceSubkind = "interface" | "type" | "enum";
@@ -40,15 +46,28 @@ type CodeNodeData = {
   kind: GraphNode["kind"];
   subkind?: InterfaceSubkind;
   searchHit?: boolean;
+  highlighted?: boolean;
+  diagnosticSeverity?: "error" | "warning";
+  diagnosticCount?: number;
+  warningCount?: number;
   childItems?: Array<{
     id: string;
     kind: string;
     title: string;
     subtitle: string;
+    diagnosticSeverity?: "error" | "warning";
+    diagnosticCount?: number;
+    warningCount?: number;
     onClick?: () => void;
   }>;
   /** Absolute/relative file path used to expand external nodes. */
   file: string;
+};
+
+type DiagnosticSummary = {
+  diagnosticSeverity: "error" | "warning";
+  diagnosticCount: number;
+  warningCount: number;
 };
 
 type FileGroupData = {
@@ -108,6 +127,144 @@ function getNodeToneClass(data: CodeNodeData): string {
   return "cgNode--default";
 }
 
+function normalizePath(p: string) {
+  return p.replace(/\\/g, "/");
+}
+
+function comparePos(
+  a: { line: number; character: number },
+  b: { line: number; character: number },
+) {
+  if (a.line !== b.line) return a.line - b.line;
+  return a.character - b.character;
+}
+
+function rangesOverlap(
+  a: GraphNode["range"],
+  b: NonNullable<CodeDiagnostic["range"]>,
+) {
+  return comparePos(a.start, b.end) <= 0 && comparePos(b.start, a.end) <= 0;
+}
+
+function rangeSize(
+  range:
+    | GraphNode["range"]
+    | NonNullable<CodeDiagnostic["range"]>,
+) {
+  return (
+    (range.end.line - range.start.line) * 1_000_000 +
+    (range.end.character - range.start.character)
+  );
+}
+
+function distanceToRange(
+  pos: { line: number; character: number },
+  range: GraphNode["range"],
+) {
+  if (comparePos(pos, range.start) < 0) {
+    return (
+      (range.start.line - pos.line) * 1_000_000 +
+      (range.start.character - pos.character)
+    );
+  }
+  if (comparePos(pos, range.end) > 0) {
+    return (
+      (pos.line - range.end.line) * 1_000_000 +
+      (pos.character - range.end.character)
+    );
+  }
+  return 0;
+}
+
+function pickDiagnosticOwner(
+  nodes: GraphNode[],
+  diagnostic: CodeDiagnostic,
+) {
+  if (!nodes.length) return null;
+
+  const orderedNodes = [...nodes].sort((a, b) => {
+    const startDiff = comparePos(a.range.start, b.range.start);
+    if (startDiff !== 0) return startDiff;
+    return rangeSize(a.range) - rangeSize(b.range);
+  });
+
+  if (!diagnostic.range) return orderedNodes[0] ?? null;
+
+  const overlapping = orderedNodes
+    .filter((node) => rangesOverlap(node.range, diagnostic.range!))
+    .sort((a, b) => {
+      const sizeDiff = rangeSize(a.range) - rangeSize(b.range);
+      if (sizeDiff !== 0) return sizeDiff;
+      return comparePos(a.range.start, b.range.start);
+    });
+  if (overlapping.length) return overlapping[0];
+
+  return (
+    orderedNodes
+      .map((node) => ({
+        node,
+        distance: distanceToRange(diagnostic.range!.start, node.range),
+      }))
+      .sort((a, b) => {
+        if (a.distance !== b.distance) return a.distance - b.distance;
+        return rangeSize(a.node.range) - rangeSize(b.node.range);
+      })[0]?.node ?? null
+  );
+}
+
+function buildDiagnosticSummaryByNode(
+  graph: GraphPayload,
+  diagnostics: CodeDiagnostic[] | undefined,
+) {
+  const summaries = new Map<string, DiagnosticSummary>();
+  if (!diagnostics?.length) return summaries;
+
+  const nodesByFile = new Map<string, GraphNode[]>();
+  for (const node of graph.nodes) {
+    if (node.kind === "file") continue;
+    const fileKey = normalizePath(node.file);
+    if (!nodesByFile.has(fileKey)) nodesByFile.set(fileKey, []);
+    nodesByFile.get(fileKey)!.push(node);
+  }
+
+  const countsByNodeId = new Map<
+    string,
+    { diagnosticCount: number; warningCount: number }
+  >();
+
+  for (const diagnostic of diagnostics) {
+    if (!diagnostic.filePath) continue;
+    const fileNodes = nodesByFile.get(normalizePath(diagnostic.filePath));
+    if (!fileNodes?.length) continue;
+
+    const owner = pickDiagnosticOwner(fileNodes, diagnostic);
+    if (!owner) continue;
+
+    const counts = countsByNodeId.get(owner.id) ?? {
+      diagnosticCount: 0,
+      warningCount: 0,
+    };
+    if (diagnostic.severity === "warning") {
+      counts.warningCount += 1;
+    } else if (diagnostic.severity === "error") {
+      counts.diagnosticCount += 1;
+    }
+    countsByNodeId.set(owner.id, counts);
+  }
+
+  for (const [nodeId, counts] of countsByNodeId.entries()) {
+    if (counts.diagnosticCount <= 0 && counts.warningCount <= 0) continue;
+    summaries.set(nodeId, {
+      diagnosticSeverity:
+        counts.diagnosticCount > 0 ? "error" : "warning",
+      diagnosticCount: counts.diagnosticCount,
+      warningCount: counts.warningCount,
+    });
+  }
+
+  return summaries;
+}
+
 function CodeNode({
   data,
   selected,
@@ -132,6 +289,7 @@ function CodeNode({
       className={[
         "cgNode",
         getNodeToneClass(data),
+        data.highlighted ? "cgNode--connected" : "",
         selected || data.searchHit ? "cgNode--selected" : "",
       ].join(" ")}
     >
@@ -164,7 +322,21 @@ function CodeNode({
 
       <div className="cgNodeTop">
         <div className="cgNodeTitle">{data.title}</div>
-        {badge ? <div className="cgBadge">{badge.toUpperCase()}</div> : null}
+        <div className="cgNodeBadges">
+          {(data.diagnosticCount ?? 0) > 0 ? (
+            <div
+              className={["cgDiagBadge", "cgDiagBadge--error"].join(" ")}
+            >
+              {`ERROR ${data.diagnosticCount ?? 0}`}
+            </div>
+          ) : null}
+          {(data.warningCount ?? 0) > 0 ? (
+            <div className={["cgDiagBadge", "cgDiagBadge--warning"].join(" ")}>
+              {`WARN ${data.warningCount ?? 0}`}
+            </div>
+          ) : null}
+          {badge ? <div className="cgBadge">{badge.toUpperCase()}</div> : null}
+        </div>
       </div>
       <div className="cgNodeSub">{data.subtitle}</div>
       {data.childItems?.length ? (
@@ -196,7 +368,29 @@ function CodeNode({
               />
               <div className="cgChildTop">
                 <div className="cgChildTitle">{child.title}</div>
-                <div className="cgChildBadge">{child.kind.toUpperCase()}</div>
+                <div className="cgChildBadgeWrap">
+                  {(child.diagnosticCount ?? 0) > 0 ? (
+                    <div
+                      className={[
+                        "cgChildDiagBadge",
+                        "cgChildDiagBadge--error",
+                      ].join(" ")}
+                    >
+                      {`ERROR ${child.diagnosticCount ?? 0}`}
+                    </div>
+                  ) : null}
+                  {(child.warningCount ?? 0) > 0 ? (
+                    <div
+                      className={[
+                        "cgChildDiagBadge",
+                        "cgChildDiagBadge--warning",
+                      ].join(" ")}
+                    >
+                      {`WARN ${child.warningCount ?? 0}`}
+                    </div>
+                  ) : null}
+                  <div className="cgChildBadge">{child.kind.toUpperCase()}</div>
+                </div>
               </div>
               <div className="cgChildSub">{child.subtitle}</div>
             </div>
@@ -290,6 +484,7 @@ const edgeTypes = { dataflow: DataflowEdge };
 function toReactFlowEdges(
   graph?: GraphPayload,
   selectedNodeId?: string | null,
+  highlightedEdgeId?: string | null,
 ): Array<Edge<DataflowEdgeData>> {
   if (!graph) return [];
 
@@ -350,8 +545,15 @@ function toReactFlowEdges(
         (e.originalSource === selectedNodeId ||
           e.originalTarget === selectedNodeId),
     );
-    const muted = Boolean(selectedNodeId && !isSelectedFlow && isDataflow);
-    const showDataflowLabel = Boolean(selectedNodeId && isSelectedFlow);
+    const isFocusedFlow = Boolean(highlightedEdgeId && e.id === highlightedEdgeId);
+    const muted = Boolean(
+      isDataflow &&
+        ((highlightedEdgeId && !isFocusedFlow) ||
+          (!highlightedEdgeId && selectedNodeId && !isSelectedFlow)),
+    );
+    const showDataflowLabel = Boolean(
+      isFocusedFlow || (selectedNodeId && isSelectedFlow),
+    );
 
     let lane = 0;
     if (isDataflow) {
@@ -382,13 +584,13 @@ function toReactFlowEdges(
             type: MarkerType.ArrowClosed,
             width: 18,
             height: 18,
-            color: isSelectedFlow ? "#38bdf8" : "#60a5fa",
+            color: isFocusedFlow || isSelectedFlow ? "#38bdf8" : "#60a5fa",
           }
         : { type: MarkerType.ArrowClosed, width: 18, height: 18 },
       style: isDataflow
         ? {
-            stroke: isSelectedFlow ? "#38bdf8" : "#60a5fa",
-            strokeWidth: isSelectedFlow ? 2.8 : 1.8,
+            stroke: isFocusedFlow || isSelectedFlow ? "#38bdf8" : "#60a5fa",
+            strokeWidth: isFocusedFlow || isSelectedFlow ? 2.8 : 1.8,
             strokeDasharray: "8 6",
             opacity: muted ? 0.2 : 0.92,
           }
@@ -397,7 +599,7 @@ function toReactFlowEdges(
       data: isDataflow
         ? {
             label: showDataflowLabel ? label : undefined,
-            highlighted: isSelectedFlow,
+            highlighted: isFocusedFlow || isSelectedFlow,
             muted,
             lane,
           }
@@ -690,6 +892,8 @@ function centerPositionsInGroup(
 function toReactFlowNodes(
   graph?: GraphPayload,
   searchHitIds?: Set<string>,
+  diagnostics?: CodeDiagnostic[],
+  highlightedNodeIds?: Set<string>,
   onActivateNode?: (nodeId: string) => void,
 ): Array<Node<CodeNodeData | FileGroupData>> {
   if (!graph) return [];
@@ -706,6 +910,8 @@ function toReactFlowNodes(
     if (!childItemsByParentId.has(n.parentId)) childItemsByParentId.set(n.parentId, []);
     childItemsByParentId.get(n.parentId)!.push(n);
   }
+
+  const diagnosticSummaryByNode = buildDiagnosticSummaryByNode(graph, diagnostics);
 
   // Group child (non-file) nodes by their owning file path.
   const byFile = new Map<string, GraphNode[]>();
@@ -803,16 +1009,19 @@ function toReactFlowNodes(
       };
 
       const data: CodeNodeData = {
+        ...(diagnosticSummaryByNode.get(n.id) ?? {}),
         title: nodeTitle(n),
         subtitle,
         kind: n.kind,
         subkind: sk,
+        highlighted: Boolean(highlightedNodeIds?.has(n.id)),
         searchHit: Boolean(searchHitIds?.has(n.id)),
         childItems: (childItemsByParentId.get(n.id) ?? []).map((child) => ({
           id: child.id,
           kind: childKindLabel(child),
           title: childTitle(n, child),
           subtitle: `${childKindLabel(child)} · ${shortFile(child.file)}:${child.range.start.line + 1}`,
+          ...(diagnosticSummaryByNode.get(child.id) ?? {}),
           onClick: onActivateNode ? () => onActivateNode(child.id) : undefined,
         })),
         file: n.file,
@@ -854,6 +1063,11 @@ export function CanvasPane({
   onGenerateFromActive,
   onUseSelectionAsRoot,
   onExpandExternal,
+  analysisDiagnostics,
+  highlightedNodeIds,
+  highlightedEdgeId,
+  inspectorFocusRequest,
+  notice,
   traceVisible,
   traceCursor,
   traceTotal,
@@ -873,24 +1087,56 @@ export function CanvasPane({
     () => getSearchHitIds(filteredGraph, searchQuery),
     [filteredGraph, searchQuery],
   );
+  const visibleHighlightedNodeIds = useMemo(() => {
+    if (!graph || !highlightedNodeIds?.length) return new Set<string>();
+    const parentIdByNodeId = new Map(
+      graph.nodes
+        .filter((node) => node.parentId)
+        .map((node) => [node.id, node.parentId as string]),
+    );
+    return new Set(
+      highlightedNodeIds.map((nodeId) => parentIdByNodeId.get(nodeId) ?? nodeId),
+    );
+  }, [graph, highlightedNodeIds]);
+  const visibleInspectorFocusNodeId = useMemo(() => {
+    if (!graph || !inspectorFocusRequest?.nodeId) return null;
+    const target = graph.nodes.find((node) => node.id === inspectorFocusRequest.nodeId);
+    if (!target) return null;
+    return target.parentId ?? target.id;
+  }, [graph, inspectorFocusRequest]);
 
   const nodes = useMemo<Array<Node<CodeNodeData | FileGroupData>>>(
     () =>
-      toReactFlowNodes(filteredGraph, searchHitIds, (nodeId) => {
-        const target = graph?.nodes.find((node) => node.id === nodeId);
-        if (!target) return;
-        onSelectNode(nodeId);
-        onOpenNode?.(target);
-        if (target.kind === "external") {
-          onExpandExternal?.(target.file);
-        }
-      }),
-    [filteredGraph, graph, onExpandExternal, onOpenNode, onSelectNode, searchHitIds],
+      toReactFlowNodes(
+        filteredGraph,
+        searchHitIds,
+        analysisDiagnostics,
+        visibleHighlightedNodeIds,
+        (nodeId) => {
+          const target = graph?.nodes.find((node) => node.id === nodeId);
+          if (!target) return;
+          onSelectNode(nodeId);
+          onOpenNode?.(target);
+          if (target.kind === "external") {
+            onExpandExternal?.(target.file);
+          }
+        },
+      ),
+    [
+      analysisDiagnostics,
+      filteredGraph,
+      graph,
+      onExpandExternal,
+      onOpenNode,
+      onSelectNode,
+      searchHitIds,
+      visibleHighlightedNodeIds,
+    ],
   );
 
   const edges = useMemo<Array<Edge<DataflowEdgeData>>>(
-    () => toReactFlowEdges(filteredGraph, selectedNodeId),
-    [filteredGraph, selectedNodeId],
+    () => toReactFlowEdges(filteredGraph, selectedNodeId, highlightedEdgeId),
+    [filteredGraph, highlightedEdgeId, selectedNodeId],
   );
 
   const visibleHasData = nodes.length > 0;
@@ -984,6 +1230,58 @@ export function CanvasPane({
     inst.setCenter(centerX, centerY, { zoom: 0.9, duration: 350 });
   }, [nodes, traceCursor, traceFocusEvent, traceVisible]);
 
+  useEffect(() => {
+    const inst = rfRef.current;
+    if (!inst || !highlightedEdgeId || visibleHighlightedNodeIds.size === 0) return;
+
+    const [firstId, secondId] = [...visibleHighlightedNodeIds];
+    const firstNode = firstId ? inst.getNode(firstId) : null;
+    const secondNode = secondId ? inst.getNode(secondId) : null;
+    if (!firstNode && !secondNode) return;
+
+    if (firstNode && secondNode) {
+      const firstWidth = firstNode.width ?? 210;
+      const firstHeight = firstNode.height ?? 72;
+      const secondWidth = secondNode.width ?? 210;
+      const secondHeight = secondNode.height ?? 72;
+      const centerX =
+        (firstNode.position.x +
+          firstWidth / 2 +
+          secondNode.position.x +
+          secondWidth / 2) /
+        2;
+      const centerY =
+        (firstNode.position.y +
+          firstHeight / 2 +
+          secondNode.position.y +
+          secondHeight / 2) /
+        2;
+      inst.setCenter(centerX, centerY, { zoom: 1.05, duration: 320 });
+      return;
+    }
+
+    const node = firstNode ?? secondNode;
+    if (!node) return;
+    inst.setCenter(node.position.x + (node.width ?? 210) / 2, node.position.y + (node.height ?? 72) / 2, {
+      zoom: 1.15,
+      duration: 320,
+    });
+  }, [highlightedEdgeId, visibleHighlightedNodeIds]);
+
+  useEffect(() => {
+    const inst = rfRef.current;
+    if (!inst || !visibleInspectorFocusNodeId || !inspectorFocusRequest) return;
+
+    const node = inst.getNode(visibleInspectorFocusNodeId);
+    if (!node) return;
+
+    inst.setCenter(
+      node.position.x + (node.width ?? 210) / 2,
+      node.position.y + (node.height ?? 72) / 2,
+      { zoom: 1.18, duration: 320 },
+    );
+  }, [inspectorFocusRequest, visibleInspectorFocusNodeId]);
+
   const isTraceAtEnd = traceCursor >= traceTotal;
   const renderTraceControls = () => (
     <div
@@ -1036,6 +1334,20 @@ export function CanvasPane({
     <section className="canvas">
       {!hasData || !visibleHasData ? (
         <div className="emptyState">
+          {notice ? (
+            <div
+              className={[
+                "canvasNotice",
+                "canvasNotice--inline",
+                `canvasNotice--${notice.severity}`,
+              ].join(" ")}
+            >
+              <div className="canvasNoticeTitle">{notice.message}</div>
+              {notice.detail ? (
+                <div className="canvasNoticeDetail">{notice.detail}</div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="emptyIcon">
             <Sigma size={20} />
           </div>
@@ -1118,6 +1430,20 @@ export function CanvasPane({
                 </div>
               ) : null}
 
+              {notice ? (
+                <div
+                  className={[
+                    "canvasNotice",
+                    `canvasNotice--${notice.severity}`,
+                  ].join(" ")}
+                >
+                  <div className="canvasNoticeTitle">{notice.message}</div>
+                  {notice.detail ? (
+                    <div className="canvasNoticeDetail">{notice.detail}</div>
+                  ) : null}
+                </div>
+              ) : null}
+
               {/* Filter/search props are currently handled upstream or will be applied later */}
               <div style={{ display: "none" }}>
                 {activeFilter} {searchQuery}
@@ -1196,6 +1522,11 @@ type Props = {
   onUseSelectionAsRoot: () => void;
 
   onExpandExternal?: (filePath: string) => void;
+  analysisDiagnostics?: CodeDiagnostic[];
+  highlightedNodeIds?: string[];
+  highlightedEdgeId?: string | null;
+  inspectorFocusRequest?: { nodeId: string; token: number } | null;
+  notice?: UINotice | null;
   traceVisible: boolean;
   traceCursor: number;
   traceTotal: number;

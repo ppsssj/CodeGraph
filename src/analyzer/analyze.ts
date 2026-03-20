@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as ts from "typescript";
 import type {
   AnalysisCallV2,
+  CodeDiagnostic,
   GraphEdge,
   GraphEdgeKind,
   GraphNode,
@@ -30,6 +31,7 @@ export function analyzeTypeScriptWithTypes(args: {
     kind: "function" | "class" | "type" | "interface" | "const" | "unknown";
   }>;
   calls: Array<AnalysisCallV2>;
+  diagnostics: CodeDiagnostic[];
   graph: GraphPayload;
   trace: GraphTraceEvent[];
   meta: { mode: "single-file" };
@@ -89,6 +91,7 @@ export function analyzeTypeScriptWithTypes(args: {
       imports: [],
       exports: [],
       calls: [],
+      diagnostics: [],
       graph: { nodes: [], edges: [] },
       trace: [],
       meta: { mode: "single-file" },
@@ -98,11 +101,20 @@ export function analyzeTypeScriptWithTypes(args: {
   const imports = extractImports(sf);
   const exports = extractExports(sf);
   const calls = extractCallsResolved(sf, checker);
+  const diagnostics = collectDiagnostics(program, sf);
 
   // single-file graph: external nodes still possible (but likely null since program has one file)
   const { graph, trace } = buildActiveFileGraph(sf, checker);
 
-  return { imports, exports, calls, graph, trace, meta: { mode: "single-file" } };
+  return {
+    imports,
+    exports,
+    calls,
+    diagnostics,
+    graph,
+    trace,
+    meta: { mode: "single-file" },
+  };
 }
 
 /**
@@ -126,6 +138,7 @@ export function analyzeWithWorkspace(args: {
     kind: "function" | "class" | "type" | "interface" | "const" | "unknown";
   }>;
   calls: Array<AnalysisCallV2>;
+  diagnostics: CodeDiagnostic[];
   graph: GraphPayload;
   trace: GraphTraceEvent[];
   meta: {
@@ -227,6 +240,7 @@ export function analyzeWithWorkspace(args: {
   const imports = extractImports(sf);
   const exports = extractExports(sf);
   const calls = extractCallsResolved(sf, checker);
+  const diagnostics = collectDiagnostics(program, sf);
 
   // workspace graph (external nodes enabled)
   const { graph, trace } = buildActiveFileGraph(sf, checker);
@@ -235,6 +249,7 @@ export function analyzeWithWorkspace(args: {
     imports,
     exports,
     calls,
+    diagnostics,
     graph,
     trace,
     meta: {
@@ -244,6 +259,75 @@ export function analyzeWithWorkspace(args: {
       projectRoot,
     },
   };
+}
+
+function collectDiagnostics(
+  program: ts.Program,
+  sourceFile: ts.SourceFile,
+): CodeDiagnostic[] {
+  const all = [
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...program.getSyntacticDiagnostics(sourceFile),
+    ...program.getSemanticDiagnostics(sourceFile),
+  ];
+
+  const seen = new Set<string>();
+  const out: CodeDiagnostic[] = [];
+
+  for (const diagnostic of all) {
+    const message = ts.flattenDiagnosticMessageText(
+      diagnostic.messageText,
+      "\n",
+    ).trim();
+    const filePath = diagnostic.file?.fileName;
+    const key = [
+      diagnostic.code,
+      diagnostic.category,
+      filePath ?? "global",
+      diagnostic.start ?? -1,
+      message,
+    ].join("@@");
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const severity: CodeDiagnostic["severity"] =
+      diagnostic.category === ts.DiagnosticCategory.Error
+        ? "error"
+        : diagnostic.category === ts.DiagnosticCategory.Warning
+          ? "warning"
+          : "info";
+
+    let range: CodeDiagnostic["range"] | undefined;
+    if (
+      diagnostic.file &&
+      typeof diagnostic.start === "number" &&
+      typeof diagnostic.length === "number"
+    ) {
+      const start = diagnostic.file.getLineAndCharacterOfPosition(
+        diagnostic.start,
+      );
+      const end = diagnostic.file.getLineAndCharacterOfPosition(
+        diagnostic.start + diagnostic.length,
+      );
+      range = {
+        start: { line: start.line, character: start.character },
+        end: { line: end.line, character: end.character },
+      };
+    }
+
+    out.push({
+      code: diagnostic.code,
+      source: "typescript",
+      severity,
+      message,
+      ...(filePath ? { filePath } : null),
+      ...(range ? { range } : null),
+    });
+  }
+
+  return out;
 }
 
 function buildWorkspaceRoots(args: {

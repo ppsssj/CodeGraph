@@ -6,7 +6,13 @@ import {
   Settings,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ExtToWebviewMessage, GraphNode, GraphPayload } from "../lib/vscode";
+import type {
+  CodeDiagnostic,
+  ExtToWebviewMessage,
+  GraphNode,
+  GraphPayload,
+  UINotice,
+} from "../lib/vscode";
 import { ActiveFileSnapshot } from "./ActiveFileSnapshot";
 import { AnalysisPanel } from "./AnalysisPanel";
 import "./Inspector.css";
@@ -32,6 +38,15 @@ type Props = {
   analysis: AnalysisPayload;
   graph?: GraphPayload;
   selectedNode: GraphNode | null;
+  notice?: UINotice | null;
+  onOpenDiagnostic: (diagnostic: CodeDiagnostic) => void;
+  onSelectGraphNode: (nodeId: string) => void;
+  onActivateGraphNode: (nodeId: string) => void;
+  onFocusParamFlow: (flow: {
+    edgeId: string;
+    sourceId: string;
+    targetId: string;
+  }) => void;
   onRefreshActive: () => void;
   onResetGraph: () => void;
   onExpandExternal: (filePath: string) => void;
@@ -91,6 +106,11 @@ export function Inspector({
   analysis,
   graph,
   selectedNode,
+  notice,
+  onOpenDiagnostic,
+  onSelectGraphNode,
+  onActivateGraphNode,
+  onFocusParamFlow,
   onRefreshActive,
   onResetGraph,
   onExpandExternal,
@@ -116,6 +136,8 @@ export function Inspector({
     .slice(0, selectedNode ? 40 : 20)
     .map((e) => ({
       id: e.id,
+      sourceId: e.source,
+      targetId: e.target,
       from: nodeById.get(e.source)?.name ?? e.source,
       to: nodeById.get(e.target)?.name ?? e.target,
       label: e.label ?? "(param flow)",
@@ -280,6 +302,15 @@ export function Inspector({
         </div>
       </div>
 
+      {notice ? (
+        <div className={["inspectorNotice", `inspectorNotice--${notice.severity}`].join(" ")}>
+          <div className="inspectorNoticeTitle">{notice.message}</div>
+          {notice.detail ? (
+            <div className="inspectorNoticeDetail">{notice.detail}</div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="inspectorActions">
         <button className="smallBtn" type="button" onClick={onRefreshActive}>
           Refresh Active
@@ -436,7 +467,29 @@ export function Inspector({
               ) : (
                 <div className="kvList">
                   {paramFlows.map((f) => (
-                    <div className="kvRow" key={f.id} style={{ display: "block" }}>
+                    <div
+                      className="kvRow inspectorFlowRow"
+                      key={f.id}
+                      style={{ display: "block" }}
+                      onClick={() =>
+                        onFocusParamFlow({
+                          edgeId: f.id,
+                          sourceId: f.sourceId,
+                          targetId: f.targetId,
+                        })
+                      }
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        onFocusParamFlow({
+                          edgeId: f.id,
+                          sourceId: f.sourceId,
+                          targetId: f.targetId,
+                        });
+                      }}
+                    >
                       <div className="mono" style={{ fontSize: 12 }}>
                         {f.from} → {f.to}
                       </div>
@@ -450,7 +503,14 @@ export function Inspector({
             </div>
           </div>
 
-          <AnalysisPanel analysis={analysis} className="panel--analysis" />
+          <AnalysisPanel
+            analysis={analysis}
+            graph={graph}
+            className="panel--analysis"
+            onOpenDiagnostic={onOpenDiagnostic}
+            onSelectGraphNode={onSelectGraphNode}
+            onActivateGraphNode={onActivateGraphNode}
+          />
         </div>
       </div>
     </aside>

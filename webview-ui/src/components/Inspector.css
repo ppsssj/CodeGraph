@@ -70,6 +70,39 @@
   position: relative;
 }
 
+.inspectorNotice {
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.inspectorNotice--info {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.inspectorNotice--warning {
+  border-color: rgba(245, 158, 11, 0.48);
+}
+
+.inspectorNotice--error {
+  border-color: rgba(248, 113, 113, 0.52);
+}
+
+.inspectorNoticeTitle {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(226, 232, 240, 0.96);
+}
+
+.inspectorNoticeDetail {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.72);
+}
+
 .inspectorActions {
   padding: 10px 14px;
   display: flex;
@@ -175,6 +208,25 @@
   border-color: #1d4ed8;
   box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.3);
   color: white;
+}
+
+.inspectorFlowRow {
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.inspectorFlowRow:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.inspectorFlowRow:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
 }
 
 /* collapsed */

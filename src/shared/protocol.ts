@@ -7,6 +7,24 @@ export type WebviewToExtMessage =
   | { type: "selectWorkspaceFile"; payload: { filePath: string } }
   | { type: "expandNode"; payload: { filePath: string } }
   | {
+      type: "saveExportFile";
+      payload: {
+        suggestedFileName: string;
+        content:
+          | {
+              kind: "text";
+              text: string;
+            }
+          | {
+              kind: "base64";
+              base64: string;
+            };
+        saveLabel: string;
+        title: string;
+        filters: Record<string, string[]>;
+      };
+    }
+  | {
       type: "openLocation";
       payload: {
         /** Absolute file system path (preferred). */
@@ -82,6 +100,30 @@ export type GraphTraceEvent =
   | { type: "node"; node: GraphNode }
   | { type: "edge"; edge: GraphEdge };
 
+export type UINoticeSeverity = "info" | "warning" | "error";
+export type UINoticeScope = "toast" | "canvas" | "inspector";
+export type UINotice = {
+  id: string;
+  scope: UINoticeScope;
+  severity: UINoticeSeverity;
+  message: string;
+  detail?: string;
+  source?: string;
+};
+
+export type CodeDiagnosticSeverity = "error" | "warning" | "info";
+export type CodeDiagnostic = {
+  code: number;
+  source: string;
+  severity: CodeDiagnosticSeverity;
+  message: string;
+  filePath?: string;
+  range?: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+};
+
 export type AnalyzerMeta =
   | {
       mode: "single";
@@ -148,10 +190,28 @@ export type ExtToWebviewMessage =
         }>;
         // V1/V2 both accepted (webview keeps backwards compatibility)
         calls: Array<AnalysisCallV1 | AnalysisCallV2>;
+        diagnostics?: CodeDiagnostic[];
 
         graph?: GraphPayload;
         trace?: GraphTraceEvent[];
 
         meta?: AnalyzerMeta;
       } | null;
+    }
+  | {
+      type: "uiNotice";
+      payload: UINotice;
+    }
+  | {
+      type: "flowExportResult";
+      payload:
+        | {
+            ok: true;
+            filePath: string;
+          }
+        | {
+            ok: false;
+            canceled?: boolean;
+            error?: string;
+          };
     };

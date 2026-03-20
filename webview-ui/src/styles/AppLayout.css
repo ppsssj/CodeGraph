@@ -35,3 +35,35 @@
   flex: 1 1 auto;
   min-height: 200px;
 }
+
+.cgToast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(8, 18, 38, 0.94);
+  color: rgba(226, 232, 240, 0.95);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cgToast--info {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.cgToast--success {
+  border-color: rgba(52, 211, 153, 0.42);
+}
+
+.cgToast--warning {
+  border-color: rgba(245, 158, 11, 0.48);
+}
+
+.cgToast--error {
+  border-color: rgba(248, 113, 113, 0.52);
+}

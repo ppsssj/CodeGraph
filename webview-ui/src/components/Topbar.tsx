@@ -32,16 +32,11 @@ type Props = {
   onFitToScreen: () => void;
   traceMode: boolean;
   onToggleTraceMode: () => void;
-
-  /** Flow 다운로드 */
-  onDownloadFlow: () => void;
-
-  /** 다운로드 가능 여부(그래프 존재 여부) */
-  downloadEnabled: boolean;
-
-  /** 다운로드 진행 상태 표시 */
-  downloadStatus: "idle" | "downloading" | "done";
-
+  onExportJson: () => void;
+  onExportJpg: () => void;
+  exportEnabled: boolean;
+  exportStatus: "idle" | "exporting" | "done";
+  exportFormat: "json" | "jpg" | null;
   searchQuery: string;
   onSearchQueryChange: (v: string) => void;
 };
@@ -58,17 +53,51 @@ export function Topbar({
   onFitToScreen,
   traceMode,
   onToggleTraceMode,
-  onDownloadFlow,
-  downloadEnabled,
-  downloadStatus,
+  onExportJson,
+  onExportJpg,
+  exportEnabled,
+  exportStatus,
+  exportFormat,
   searchQuery,
   onSearchQueryChange,
 }: Props) {
-  const isDownloading = downloadStatus === "downloading";
-  const isDone = downloadStatus === "done";
+  const isExporting = exportStatus === "exporting";
+  const isDone = exportStatus === "done";
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  const exportRef = useRef<HTMLDivElement | null>(null);
+
+  const closePicker = () => {
+    setPickerOpen(false);
+    setPickerQuery("");
+  };
+
+  const togglePicker = () => {
+    if (pickerOpen) {
+      closePicker();
+      return;
+    }
+
+    setExportMenuOpen(false);
+    setPickerOpen(true);
+  };
+
+  const closeExportMenu = () => {
+    setExportMenuOpen(false);
+  };
+
+  const toggleExportMenu = () => {
+    if (!exportEnabled || isExporting) return;
+    if (exportMenuOpen) {
+      closeExportMenu();
+      return;
+    }
+
+    closePicker();
+    setExportMenuOpen(true);
+  };
 
   const activeWorkspaceFile = useMemo(
     () => workspaceFiles.find((file) => file.path === activeFilePath) ?? null,
@@ -84,16 +113,25 @@ export function Topbar({
   }, [pickerQuery, workspaceFiles]);
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!pickerOpen && !exportMenuOpen) return;
 
     const onPointerDown = (event: PointerEvent) => {
-      if (!pickerRef.current?.contains(event.target as Node)) {
-        setPickerOpen(false);
+      const target = event.target as Node;
+
+      if (!pickerRef.current?.contains(target)) {
+        closePicker();
+      }
+
+      if (!exportRef.current?.contains(target)) {
+        closeExportMenu();
       }
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPickerOpen(false);
+      if (event.key === "Escape") {
+        closePicker();
+        closeExportMenu();
+      }
     };
 
     window.addEventListener("pointerdown", onPointerDown);
@@ -102,11 +140,7 @@ export function Topbar({
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [pickerOpen]);
-
-  useEffect(() => {
-    if (!pickerOpen) setPickerQuery("");
-  }, [pickerOpen]);
+  }, [exportMenuOpen, pickerOpen]);
 
   return (
     <header className={["topbar", traceMode ? "topbar--traceOn" : ""].join(" ")}>
@@ -132,7 +166,7 @@ export function Topbar({
               pickerOpen ? "projectPicker--open" : "",
             ].join(" ")}
             type="button"
-            onClick={() => setPickerOpen((prev) => !prev)}
+            onClick={togglePicker}
             aria-expanded={pickerOpen}
           >
             <span className="projectName">
@@ -174,7 +208,7 @@ export function Topbar({
                         ].join(" ")}
                         type="button"
                         onClick={() => {
-                          setPickerOpen(false);
+                          closePicker();
                           onPickFile(file.path);
                         }}
                       >
@@ -234,32 +268,62 @@ export function Topbar({
           <Maximize2 className="icon" />
         </button>
 
-        {/* ✅ FLOW 다운로드 */}
-        <button
-          className={[
-            "iconBtn",
-            !downloadEnabled ? "iconBtn--disabled" : "",
-            isDownloading ? "iconBtn--busy" : "",
-          ].join(" ")}
-          title={
-            !downloadEnabled
-              ? "No graph to download"
-              : isDownloading
-              ? "Downloading…"
-              : isDone
-              ? "Download complete"
-              : "Download Flow"
-          }
-          type="button"
-          onClick={onDownloadFlow}
-          aria-disabled={!downloadEnabled || isDownloading}
-        >
-          {isDownloading ? (
-            <Loader2 className="icon spin" />
-          ) : (
-            <Download className="icon" />
-          )}
-        </button>
+        <div className="exportMenuWrap" ref={exportRef}>
+          <button
+            className={[
+              "iconBtn",
+              !exportEnabled ? "iconBtn--disabled" : "",
+              isExporting ? "iconBtn--busy" : "",
+              exportMenuOpen ? "iconBtn--activeMenu" : "",
+            ].join(" ")}
+            title={
+              isExporting
+                ? `Exporting ${exportFormat?.toUpperCase() ?? "graph"}`
+                : isDone
+                ? "Export complete"
+                : !exportEnabled
+                ? "No graph to export"
+                : "Export graph"
+            }
+            type="button"
+            onClick={toggleExportMenu}
+            aria-disabled={!exportEnabled || isExporting}
+            aria-expanded={exportMenuOpen}
+          >
+            {isExporting ? (
+              <Loader2 className="icon spin" />
+            ) : (
+              <Download className="icon" />
+            )}
+          </button>
+
+          {exportMenuOpen ? (
+            <div className="exportMenu">
+              <button
+                className="exportMenuItem"
+                type="button"
+                onClick={() => {
+                  closeExportMenu();
+                  onExportJson();
+                }}
+              >
+                <span className="exportMenuItemTitle">JSON export</span>
+                <span className="exportMenuItemMeta">.json</span>
+              </button>
+              <button
+                className="exportMenuItem"
+                type="button"
+                onClick={() => {
+                  closeExportMenu();
+                  onExportJpg();
+                }}
+              >
+                <span className="exportMenuItemTitle">JPG snapshot</span>
+                <span className="exportMenuItemMeta">.jpg</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
 
         <div className="divider" />
 
