@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Settings,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type {
   CodeDiagnostic,
@@ -29,8 +30,17 @@ type AnalysisPayload = Extract<
   ExtToWebviewMessage,
   { type: "analysisResult" }
 >["payload"];
+
 export type InspectorPlacement = "auto" | "right" | "bottom";
 export type EffectiveInspectorPlacement = Exclude<InspectorPlacement, "auto">;
+type CollapseDirection = "vertical" | "horizontal";
+type SectionKey =
+  | "snapshot"
+  | "root"
+  | "selected"
+  | "selection"
+  | "flow"
+  | "analysis";
 
 type Props = {
   activeFile: ActiveFilePayload;
@@ -52,18 +62,23 @@ type Props = {
   onExpandExternal: (filePath: string) => void;
   rootNode?: GraphNode | null;
   onClearRoot?: () => void;
-
-  /** Inspector collapsed state is owned by App. */
   collapsed?: boolean;
-  /** Width in px when expanded (App controls persistence). */
   width?: number;
-  /** Height in px when bottom-docked (App controls persistence). */
   height?: number;
   placement: InspectorPlacement;
   effectivePlacement: EffectiveInspectorPlacement;
   onPlacementChange: (placement: InspectorPlacement) => void;
-  /** Toggle collapse/expand. */
   onToggleCollapsed?: () => void;
+};
+
+const SECTION_STORAGE_KEY = "cg.inspector.sections";
+const DEFAULT_SECTION_STATE: Record<SectionKey, boolean> = {
+  snapshot: true,
+  root: true,
+  selected: true,
+  selection: true,
+  flow: true,
+  analysis: true,
 };
 
 function shortFile(p: string) {
@@ -74,7 +89,7 @@ function shortFile(p: string) {
 function fmtRange(n: GraphNode) {
   const s = n.range.start;
   const e = n.range.end;
-  return `${s.line + 1}:${s.character + 1} → ${e.line + 1}:${e.character + 1}`;
+  return `${s.line + 1}:${s.character + 1} -> ${e.line + 1}:${e.character + 1}`;
 }
 
 type NodeSig = {
@@ -100,6 +115,89 @@ function fmtSig(n: GraphNodeWithSig) {
   return n.signature?.trim() ? n.signature : "(none)";
 }
 
+function loadSectionState() {
+  try {
+    const raw = localStorage.getItem(SECTION_STORAGE_KEY);
+    if (!raw) return DEFAULT_SECTION_STATE;
+    const parsed = JSON.parse(raw) as Partial<Record<SectionKey, boolean>>;
+    return { ...DEFAULT_SECTION_STATE, ...parsed };
+  } catch {
+    return DEFAULT_SECTION_STATE;
+  }
+}
+
+function PanelChevron({
+  collapsed,
+  collapseDirection,
+}: {
+  collapsed: boolean;
+  collapseDirection: CollapseDirection;
+}) {
+  if (collapseDirection === "horizontal") {
+    return collapsed ? (
+      <ChevronRight className="icon" />
+    ) : (
+      <ChevronLeft className="icon" />
+    );
+  }
+
+  return collapsed ? (
+    <ChevronRight className="icon" />
+  ) : (
+    <ChevronDown className="icon" />
+  );
+}
+
+function InspectorPanel({
+  title,
+  open,
+  onToggle,
+  collapseDirection,
+  className,
+  actions,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  collapseDirection: CollapseDirection;
+  className?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={[
+        "panel",
+        className ?? "",
+        open ? "" : "panel--collapsed",
+      ]
+        .join(" ")
+        .trim()}
+    >
+      <div className="panelHeader panelHeader--collapsible">
+        <div className="panelHeaderTitleWrap">
+          <button
+            className="panelToggleBtn"
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
+            onClick={onToggle}
+          >
+            <PanelChevron
+              collapsed={!open}
+              collapseDirection={collapseDirection}
+            />
+          </button>
+          <span className="panelHeaderTitleText">{title}</span>
+        </div>
+        {open && actions ? <div className="panelHeaderActions">{actions}</div> : null}
+      </div>
+      {open ? <div className="panelBody">{children}</div> : null}
+    </div>
+  );
+}
+
 export function Inspector({
   activeFile,
   selection,
@@ -116,7 +214,6 @@ export function Inspector({
   onExpandExternal,
   rootNode = null,
   onClearRoot,
-
   collapsed = false,
   width,
   height,
@@ -126,8 +223,14 @@ export function Inspector({
   onToggleCollapsed,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sectionOpen, setSectionOpen] = useState<Record<SectionKey, boolean>>(
+    () => loadSectionState(),
+  );
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const nodeById = new Map((graph?.nodes ?? []).map((n) => [n.id, n]));
+  const collapseDirection: CollapseDirection =
+    effectivePlacement === "bottom" ? "horizontal" : "vertical";
+
   const paramFlows = (graph?.edges ?? [])
     .filter((e) => e.kind === "dataflow")
     .filter((e) =>
@@ -163,6 +266,18 @@ export function Inspector({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [settingsOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(sectionOpen));
+    } catch {
+      // ignore
+    }
+  }, [sectionOpen]);
+
+  const toggleSection = (key: SectionKey) => {
+    setSectionOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const collapseIcon =
     effectivePlacement === "bottom" ? (
@@ -291,7 +406,7 @@ export function Inspector({
                         <small>{description}</small>
                       </span>
                       <span className="inspectorMenuCheck" aria-hidden="true">
-                        {active ? "●" : ""}
+                        {active ? "ok" : ""}
                       </span>
                     </button>
                   );
@@ -338,170 +453,174 @@ export function Inspector({
             languageId={activeFile?.languageId}
             text={activeFile?.text}
             onRefresh={onRefreshActive}
+            collapsed={!sectionOpen.snapshot}
+            onToggleCollapsed={() => toggleSection("snapshot")}
+            collapseDirection={collapseDirection}
           />
 
-          {/* ✅ Root node (optional) */}
-          <div className="panel panel--root">
-            <div
-              className="panelHeader"
-              style={{ display: "flex", justifyContent: "space-between" }}
-            >
-              <span>ROOT</span>
-              {rootNode && onClearRoot ? (
+          <InspectorPanel
+            className="panel--root"
+            title="ROOT"
+            open={sectionOpen.root}
+            onToggle={() => toggleSection("root")}
+            collapseDirection={collapseDirection}
+            actions={
+              rootNode && onClearRoot ? (
                 <button className="smallBtn" type="button" onClick={onClearRoot}>
                   Clear Root
                 </button>
-              ) : null}
-            </div>
-            <div className="panelBody">
-              {!rootNode ? (
-                <div className="mutedText">No root selected.</div>
-              ) : (
-                <div className="kvList">
-                  <div className="kvRow">
-                    <div className="kvKey mono">kind</div>
-                    <div className="kvVal mono">{rootNode.kind}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">name</div>
-                    <div className="kvVal mono">{rootNode.name}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">file</div>
-                    <div className="kvVal mono">{shortFile(rootNode.file)}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">range</div>
-                    <div className="kvVal mono">{fmtRange(rootNode)}</div>
-                  </div>
+              ) : null
+            }
+          >
+            {!rootNode ? (
+              <div className="mutedText">No root selected.</div>
+            ) : (
+              <div className="kvList">
+                <div className="kvRow">
+                  <div className="kvKey mono">kind</div>
+                  <div className="kvVal mono">{rootNode.kind}</div>
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* ✅ Selected node details */}
-          <div className="panel panel--selected">
-            <div className="panelHeader">
-              <span>SELECTED NODE</span>
-            </div>
-            <div className="panelBody" style={{ gap: 10 }}>
-              {!selectedNode ? (
-                <div className="mutedText">
-                  No node selected. Click a node in the graph.
+                <div className="kvRow">
+                  <div className="kvKey mono">name</div>
+                  <div className="kvVal mono">{rootNode.name}</div>
                 </div>
-              ) : (
-                <div className="kvList">
-                  <div className="kvRow">
-                    <div className="kvKey mono">kind</div>
-                    <div className="kvVal mono">{selectedNode.kind}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">name</div>
-                    <div className="kvVal mono">{selectedNode.name}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">file</div>
-                    <div className="kvVal mono">
-                      {shortFile(selectedNode.file)}
-                    </div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">range</div>
-                    <div className="kvVal mono">{fmtRange(selectedNode)}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">signature</div>
-                    <div className="kvVal mono">
-                      {fmtSig(selectedNode as GraphNodeWithSig)}
-                    </div>
-                  </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">file</div>
+                  <div className="kvVal mono">{shortFile(rootNode.file)}</div>
                 </div>
-              )}
-            </div>
-          </div>
-
-          <div className="panel panel--selection">
-            <div className="panelHeader">
-              <span>SELECTION</span>
-            </div>
-            <div className="panelBody">
-              <div className="mono" style={{ fontSize: 11, opacity: 0.85 }}>
-                {selection
-                  ? `${selection.start.line + 1}:${selection.start.character} → ${
-                      selection.end.line + 1
-                    }:${selection.end.character}`
-                  : "No selection"}
+                <div className="kvRow">
+                  <div className="kvKey mono">range</div>
+                  <div className="kvVal mono">{fmtRange(rootNode)}</div>
+                </div>
               </div>
+            )}
+          </InspectorPanel>
 
-              <pre
-                className="mono"
-                style={{
-                  margin: 0,
-                  maxHeight: 140,
-                  overflow: "auto",
-                  padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid var(--border)",
-                  background: "rgba(255,255,255,0.03)",
-                  fontSize: 12,
-                  lineHeight: 1.45,
-                  whiteSpace: "pre",
-                }}
-              >
-                {selection?.selectionText || ""}
-              </pre>
-            </div>
-          </div>
-
-          <div className="panel panel--flow">
-            <div className="panelHeader">
-              <span>PARAM FLOW</span>
-            </div>
-            <div className="panelBody">
-              {paramFlows.length === 0 ? (
-                <div className="mutedText">
-                  {selectedNode
-                    ? "No parameter flow for selected node."
-                    : "No parameter flow detected."}
+          <InspectorPanel
+            className="panel--selected"
+            title="SELECTED NODE"
+            open={sectionOpen.selected}
+            onToggle={() => toggleSection("selected")}
+            collapseDirection={collapseDirection}
+          >
+            {!selectedNode ? (
+              <div className="mutedText">
+                No node selected. Click a node in the graph.
+              </div>
+            ) : (
+              <div className="kvList">
+                <div className="kvRow">
+                  <div className="kvKey mono">kind</div>
+                  <div className="kvVal mono">{selectedNode.kind}</div>
                 </div>
-              ) : (
-                <div className="kvList">
-                  {paramFlows.map((f) => (
-                    <div
-                      className="kvRow inspectorFlowRow"
-                      key={f.id}
-                      style={{ display: "block" }}
-                      onClick={() =>
-                        onFocusParamFlow({
-                          edgeId: f.id,
-                          sourceId: f.sourceId,
-                          targetId: f.targetId,
-                        })
-                      }
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter" && event.key !== " ") return;
-                        event.preventDefault();
-                        onFocusParamFlow({
-                          edgeId: f.id,
-                          sourceId: f.sourceId,
-                          targetId: f.targetId,
-                        });
-                      }}
-                    >
-                      <div className="mono" style={{ fontSize: 12 }}>
-                        {f.from} → {f.to}
-                      </div>
-                      <div className="mutedText mono" title={f.label}>
-                        {f.label}
-                      </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">name</div>
+                  <div className="kvVal mono">{selectedNode.name}</div>
+                </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">file</div>
+                  <div className="kvVal mono">{shortFile(selectedNode.file)}</div>
+                </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">range</div>
+                  <div className="kvVal mono">{fmtRange(selectedNode)}</div>
+                </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">signature</div>
+                  <div className="kvVal mono">
+                    {fmtSig(selectedNode as GraphNodeWithSig)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </InspectorPanel>
+
+          <InspectorPanel
+            className="panel--selection"
+            title="SELECTION"
+            open={sectionOpen.selection}
+            onToggle={() => toggleSection("selection")}
+            collapseDirection={collapseDirection}
+          >
+            <div className="mono" style={{ fontSize: 11, opacity: 0.85 }}>
+              {selection
+                ? `${selection.start.line + 1}:${selection.start.character + 1} -> ${
+                    selection.end.line + 1
+                  }:${selection.end.character + 1}`
+                : "No selection"}
+            </div>
+
+            <pre
+              className="mono"
+              style={{
+                margin: 0,
+                maxHeight: 140,
+                overflow: "auto",
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: "rgba(255,255,255,0.03)",
+                fontSize: 12,
+                lineHeight: 1.45,
+                whiteSpace: "pre",
+              }}
+            >
+              {selection?.selectionText || ""}
+            </pre>
+          </InspectorPanel>
+
+          <InspectorPanel
+            className="panel--flow"
+            title="PARAM FLOW"
+            open={sectionOpen.flow}
+            onToggle={() => toggleSection("flow")}
+            collapseDirection={collapseDirection}
+          >
+            {paramFlows.length === 0 ? (
+              <div className="mutedText">
+                {selectedNode
+                  ? "No parameter flow for selected node."
+                  : "No parameter flow detected."}
+              </div>
+            ) : (
+              <div className="kvList">
+                {paramFlows.map((f) => (
+                  <div
+                    className="kvRow inspectorFlowRow"
+                    key={f.id}
+                    style={{ display: "block" }}
+                    onClick={() =>
+                      onFocusParamFlow({
+                        edgeId: f.id,
+                        sourceId: f.sourceId,
+                        targetId: f.targetId,
+                      })
+                    }
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      onFocusParamFlow({
+                        edgeId: f.id,
+                        sourceId: f.sourceId,
+                        targetId: f.targetId,
+                      });
+                    }}
+                  >
+                    <div className="mono" style={{ fontSize: 12 }}>
+                      {f.from}
+                      {" -> "}
+                      {f.to}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+                    <div className="mutedText mono" title={f.label}>
+                      {f.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </InspectorPanel>
 
           <AnalysisPanel
             analysis={analysis}
@@ -510,6 +629,9 @@ export function Inspector({
             onOpenDiagnostic={onOpenDiagnostic}
             onSelectGraphNode={onSelectGraphNode}
             onActivateGraphNode={onActivateGraphNode}
+            collapsed={!sectionOpen.analysis}
+            onToggleCollapsed={() => toggleSection("analysis")}
+            collapseDirection={collapseDirection}
           />
         </div>
       </div>

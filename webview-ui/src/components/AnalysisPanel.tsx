@@ -1,5 +1,14 @@
 // import "./../App.css";
-import { ArrowDownLeft, ArrowUpRight, Sigma, Network } from "lucide-react";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Network,
+  Sigma,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import type {
   CodeDiagnostic,
   ExtToWebviewMessage,
@@ -7,10 +16,13 @@ import type {
   GraphPayload,
 } from "../lib/vscode";
 import "./AnalysisPanel.css";
+
 type AnalysisPayload = Extract<
   ExtToWebviewMessage,
   { type: "analysisResult" }
 >["payload"];
+
+type CollapseDirection = "vertical" | "horizontal";
 
 type Props = {
   analysis: AnalysisPayload;
@@ -19,6 +31,9 @@ type Props = {
   onOpenDiagnostic?: (diagnostic: CodeDiagnostic) => void;
   onSelectGraphNode?: (nodeId: string) => void;
   onActivateGraphNode?: (nodeId: string) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+  collapseDirection?: CollapseDirection;
 };
 
 type CallV1 = { name: string; count: number };
@@ -129,11 +144,17 @@ function nameMatchScore(node: GraphNode, preferredNames: string[]) {
       best = Math.max(best, 96);
       continue;
     }
-    if (rawName.startsWith(`${preferred} (`) || rawName.startsWith(`new ${preferred} (`)) {
+    if (
+      rawName.startsWith(`${preferred} (`) ||
+      rawName.startsWith(`new ${preferred} (`)
+    ) {
       best = Math.max(best, 108);
       continue;
     }
-    if (cleanName.includes(cleanPreferred) || cleanNoCtor.includes(cleanPreferred)) {
+    if (
+      cleanName.includes(cleanPreferred) ||
+      cleanNoCtor.includes(cleanPreferred)
+    ) {
       best = Math.max(best, 72);
     }
   }
@@ -157,7 +178,8 @@ function findBestNodeByLocation(
 
   const candidates = [...fileCandidates];
   candidates.sort((a, b) => {
-    const nameScoreDiff = nameMatchScore(b, preferredNames) - nameMatchScore(a, preferredNames);
+    const nameScoreDiff =
+      nameMatchScore(b, preferredNames) - nameMatchScore(a, preferredNames);
     if (nameScoreDiff !== 0) return nameScoreDiff;
 
     if (range) {
@@ -219,6 +241,28 @@ function candidateNamesFromCall(call: CallV1 | CallV2) {
   return uniqueNames([raw, stripCtorPrefix(raw)]);
 }
 
+function PanelChevron({
+  collapsed,
+  collapseDirection,
+}: {
+  collapsed: boolean;
+  collapseDirection: CollapseDirection;
+}) {
+  if (collapseDirection === "horizontal") {
+    return collapsed ? (
+      <ChevronRight className="icon" />
+    ) : (
+      <ChevronLeft className="icon" />
+    );
+  }
+
+  return collapsed ? (
+    <ChevronRight className="icon" />
+  ) : (
+    <ChevronDown className="icon" />
+  );
+}
+
 export function AnalysisPanel({
   analysis,
   graph,
@@ -226,18 +270,45 @@ export function AnalysisPanel({
   onOpenDiagnostic,
   onSelectGraphNode,
   onActivateGraphNode,
+  collapsed = false,
+  onToggleCollapsed,
+  collapseDirection = "vertical",
 }: Props) {
+  const panelClassName = [
+    "panel",
+    className ?? "",
+    collapsed ? "panel--collapsed" : "",
+  ]
+    .join(" ")
+    .trim();
+
   if (!analysis) {
     return (
-      <div className={className ? `panel ${className}` : "panel"}>
-        <div className="panelHeader">
-          <span>ANALYSIS</span>
-        </div>
-        <div className="panelBody">
-          <div className="mutedText">
-            No analysis result yet. Click Generate.
+      <div className={panelClassName}>
+        <div className="panelHeader panelHeader--collapsible">
+          <div className="panelHeaderTitleWrap">
+            {onToggleCollapsed ? (
+              <button
+                className="panelToggleBtn"
+                type="button"
+                aria-expanded={!collapsed}
+                aria-label={collapsed ? "Expand Analysis" : "Collapse Analysis"}
+                onClick={onToggleCollapsed}
+              >
+                <PanelChevron
+                  collapsed={collapsed}
+                  collapseDirection={collapseDirection}
+                />
+              </button>
+            ) : null}
+            <span className="panelHeaderTitleText">ANALYSIS</span>
           </div>
         </div>
+        {!collapsed ? (
+          <div className="panelBody">
+            <div className="mutedText">No analysis result yet. Click Generate.</div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -245,7 +316,9 @@ export function AnalysisPanel({
   const nodesLen = analysis.graph?.nodes?.length ?? 0;
   const edgesLen = analysis.graph?.edges?.length ?? 0;
   const diagnostics = analysis.diagnostics ?? [];
-  const graphNodes = (graph ?? analysis.graph)?.nodes?.filter((node) => node.kind !== "file") ?? [];
+  const graphNodes =
+    (graph ?? analysis.graph)?.nodes?.filter((node) => node.kind !== "file") ?? [];
+
   const activateNode = (nodeId: string) => {
     if (onActivateGraphNode) {
       onActivateGraphNode(nodeId);
@@ -255,315 +328,334 @@ export function AnalysisPanel({
   };
 
   return (
-    <div className={className ? `panel ${className}` : "panel"}>
-      <div className="panelHeader">
-        <span>ANALYSIS</span>
-        <span className="mono" style={{ opacity: 0.75 }}>
-          {analysis.stats.lines} lines · {analysis.stats.chars} chars
-        </span>
+    <div className={panelClassName}>
+      <div className="panelHeader panelHeader--collapsible">
+        <div className="panelHeaderTitleWrap">
+          {onToggleCollapsed ? (
+            <button
+              className="panelToggleBtn"
+              type="button"
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? "Expand Analysis" : "Collapse Analysis"}
+              onClick={onToggleCollapsed}
+            >
+              <PanelChevron
+                collapsed={collapsed}
+                collapseDirection={collapseDirection}
+              />
+            </button>
+          ) : null}
+          <span className="panelHeaderTitleText">ANALYSIS</span>
+        </div>
+        {!collapsed ? (
+          <span className="panelHeaderMeta mono" style={{ opacity: 0.75 }}>
+            {analysis.stats.lines} lines · {analysis.stats.chars} chars
+          </span>
+        ) : null}
       </div>
 
-      <div className="panelBody" style={{ gap: 14 }}>
-        <Section
-          title={`Diagnostics (${diagnostics.length})`}
-          icon={<Network className="icon" />}
-        >
-          {diagnostics.length === 0 ? (
-            <div className="mutedText">No TypeScript diagnostics detected.</div>
-          ) : (
-            <div className="kvList">
-              {diagnostics.slice(0, 12).map((diag, idx) => {
-                const location = diag.filePath && diag.range
-                  ? `${shortFile(diag.filePath)}:${diag.range.start.line + 1}:${diag.range.start.character + 1}`
-                  : diag.filePath
-                    ? shortFile(diag.filePath)
-                    : "workspace";
+      {!collapsed ? (
+        <div className="panelBody" style={{ gap: 14 }}>
+          <Section
+            title={`Diagnostics (${diagnostics.length})`}
+            icon={<Network className="icon" />}
+          >
+            {diagnostics.length === 0 ? (
+              <div className="mutedText">No TypeScript diagnostics detected.</div>
+            ) : (
+              <div className="kvList">
+                {diagnostics.slice(0, 12).map((diag, idx) => {
+                  const location =
+                    diag.filePath && diag.range
+                      ? `${shortFile(diag.filePath)}:${diag.range.start.line + 1}:${diag.range.start.character + 1}`
+                      : diag.filePath
+                        ? shortFile(diag.filePath)
+                        : "workspace";
 
-                return (
-                  <div
-                    className={[
-                      "kvRow",
-                      diag.filePath && diag.range ? "analysisInteractiveRow" : "",
-                    ].join(" ")}
-                    key={`${diag.code}-${location}-${idx}`}
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                    onClick={() => {
-                      if (diag.filePath && diag.range) {
-                        const targetNode = findBestNodeByLocation(
-                          graph,
-                          diag.filePath,
-                          diag.range,
-                        );
-                        if (targetNode) activateNode(targetNode.id);
-                        onOpenDiagnostic?.(diag);
-                      }
-                    }}
-                    role={diag.filePath && diag.range ? "button" : undefined}
-                    tabIndex={diag.filePath && diag.range ? 0 : undefined}
-                    onKeyDown={(event) => {
-                      if (
-                        diag.filePath &&
-                        diag.range &&
-                        (event.key === "Enter" || event.key === " ")
-                      ) {
-                        event.preventDefault();
-                        const targetNode = findBestNodeByLocation(
-                          graph,
-                          diag.filePath,
-                          diag.range,
-                        );
-                        if (targetNode) activateNode(targetNode.id);
-                        onOpenDiagnostic?.(diag);
-                      }
-                    }}
-                  >
+                  return (
                     <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        width: "100%",
+                      className={[
+                        "kvRow",
+                        diag.filePath && diag.range ? "analysisInteractiveRow" : "",
+                      ].join(" ")}
+                      key={`${diag.code}-${location}-${idx}`}
+                      style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                      onClick={() => {
+                        if (diag.filePath && diag.range) {
+                          const targetNode = findBestNodeByLocation(
+                            graph,
+                            diag.filePath,
+                            diag.range,
+                          );
+                          if (targetNode) activateNode(targetNode.id);
+                          onOpenDiagnostic?.(diag);
+                        }
+                      }}
+                      role={diag.filePath && diag.range ? "button" : undefined}
+                      tabIndex={diag.filePath && diag.range ? 0 : undefined}
+                      onKeyDown={(event) => {
+                        if (
+                          diag.filePath &&
+                          diag.range &&
+                          (event.key === "Enter" || event.key === " ")
+                        ) {
+                          event.preventDefault();
+                          const targetNode = findBestNodeByLocation(
+                            graph,
+                            diag.filePath,
+                            diag.range,
+                          );
+                          if (targetNode) activateNode(targetNode.id);
+                          onOpenDiagnostic?.(diag);
+                        }
                       }}
                     >
-                      <span className="mono" style={{ opacity: 0.95 }}>
-                        TS{diag.code}
-                      </span>
-                      <span className="mono" style={{ opacity: 0.72 }}>
-                        {diag.severity.toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="mutedText" title={diag.message}>
-                      {diag.message}
-                    </div>
-                    <div className="mutedText mono" title={location}>
-                      {location}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Section>
-
-        {/* Graph */}
-        <Section
-          title={`Graph (${nodesLen} nodes · ${edgesLen} edges)`}
-          icon={<Network className="icon" />}
-        >
-          {analysis.graph ? (
-            <div className="kvList" style={{ gap: 8 }}>
-              <div className="kvRow">
-                <div className="kvKey mono">nodes</div>
-                <div className="kvVal mono">{nodesLen}</div>
-              </div>
-              <div className="kvRow">
-                <div className="kvKey mono">edges</div>
-                <div className="kvVal mono">{edgesLen}</div>
-              </div>
-              {graphNodes.slice(0, 12).map((node) => (
-                <button
-                  key={node.id}
-                  className="analysisInteractiveRow analysisInteractiveButton"
-                  type="button"
-                  onClick={() => activateNode(node.id)}
-                >
-                  <span className="mono analysisInteractivePrimary" title={node.name}>
-                    {node.name}
-                  </span>
-                  <span className="mono analysisInteractiveMeta">
-                    {node.kind}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="mutedText">
-              No graph payload found in analysisResult.
-            </div>
-          )}
-        </Section>
-
-        {/* Imports */}
-        <Section
-          title={`Imports (${analysis.imports.length})`}
-          icon={<ArrowDownLeft className="icon" />}
-        >
-          {analysis.imports.length === 0 ? (
-            <div className="mutedText">No imports detected.</div>
-          ) : (
-            <div className="kvList">
-              {analysis.imports.slice(0, 30).map((imp, idx) => {
-                const targetNode = findBestNodeByNames(
-                  graph,
-                  candidateNamesFromImport(imp.source, imp.specifiers),
-                );
-                return (
-                  <button
-                    className={[
-                      "analysisInteractiveButton",
-                      targetNode ? "analysisInteractiveRow" : "",
-                    ].join(" ")}
-                    type="button"
-                    key={`${imp.source}-${idx}`}
-                    onClick={() => {
-                      if (targetNode) activateNode(targetNode.id);
-                    }}
-                    disabled={!targetNode}
-                  >
-                    <div className="kvKey mono">{imp.source}</div>
-                    <div className="kvVal mono">
-                      {imp.kind === "side-effect"
-                        ? "(side-effect)"
-                        : imp.specifiers.length
-                          ? imp.specifiers.join(", ")
-                          : "(none)"}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </Section>
-
-        {/* Exports */}
-        <Section
-          title={`Exports (${analysis.exports.length})`}
-          icon={<ArrowUpRight className="icon" />}
-        >
-          {analysis.exports.length === 0 ? (
-            <div className="mutedText">No exports detected.</div>
-          ) : (
-            <div className="tagGrid">
-              {analysis.exports.slice(0, 40).map((ex, idx) => (
-                <span className="tag" key={`${ex.name}-${idx}`}>
-                  <span className="tagKind">{ex.kind}</span>
-                  <span className="tagName mono">{ex.name}</span>
-                </span>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        {/* Calls */}
-        <Section
-          title={`Calls (top ${Math.min(analysis.calls.length, 20)})`}
-          icon={<Sigma className="icon" />}
-        >
-          {analysis.calls.length === 0 ? (
-            <div className="mutedText">No calls detected.</div>
-          ) : (
-            <div className="kvList">
-              {analysis.calls.slice(0, 20).map((c, idx) => {
-                const rawLabel = isCallV2(c) ? c.calleeName : c.name;
-
-                const safeLabel =
-                  typeof rawLabel === "string" && rawLabel.trim().length > 0
-                    ? rawLabel
-                    : "(unknown)";
-
-                let meta: string | null = null;
-                if (isCallV2(c)) {
-                  if (c.declFile && c.declRange) {
-                    const s = c.declRange.start;
-                    meta = `${shortFile(c.declFile)}:${s.line + 1}:${s.character + 1}${
-                      c.isExternal ? " (External)" : ""
-                    }`;
-                  } else if (c.isExternal) {
-                    meta = "External";
-                  } else {
-                    meta = "Unresolved";
-                  }
-                }
-
-                const key = isCallV2(c)
-                  ? `${safeLabel}-${c.declFile ?? "null"}-${c.declRange?.start.line ?? "n"}-${idx}`
-                  : `${safeLabel}-${idx}`;
-
-                return (
-                  <div
-                    className={[
-                      "kvRow",
-                      isCallV2(c) && c.declFile ? "analysisInteractiveRow" : "",
-                    ].join(" ")}
-                    key={key}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                    }}
-                    onClick={() => {
-                      if (!isCallV2(c)) return;
-                      const targetNode = c.declFile
-                        ? findBestNodeByLocation(
-                            graph,
-                            c.declFile,
-                            c.declRange,
-                            candidateNamesFromCall(c),
-                          )
-                        : findBestNodeByNames(graph, candidateNamesFromCall(c));
-                      if (targetNode) activateNode(targetNode.id);
-                    }}
-                    role={isCallV2(c) ? "button" : undefined}
-                    tabIndex={isCallV2(c) ? 0 : undefined}
-                    onKeyDown={(event) => {
-                      if (!isCallV2(c)) return;
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      const targetNode = c.declFile
-                        ? findBestNodeByLocation(
-                            graph,
-                            c.declFile,
-                            c.declRange,
-                            candidateNamesFromCall(c),
-                          )
-                        : findBestNodeByNames(graph, candidateNamesFromCall(c));
-                      if (targetNode) activateNode(targetNode.id);
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        width: "100%",
-                      }}
-                    >
-                      <span
-                        className="mono"
-                        title={safeLabel}
+                      <div
                         style={{
-                          flex: 1,
-                          minWidth: 0,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          width: "100%",
                         }}
                       >
-                        {safeLabel}
-                      </span>
-
-                      <span className="mono" style={{ opacity: 0.75 }}>
-                        ()
-                      </span>
-
-                      <span className="mono" style={{ opacity: 0.9 }}>
-                        {c.count}
-                      </span>
-                    </div>
-
-                    {meta ? (
-                      <div className="mutedText mono" title={meta}>
-                        {meta}
+                        <span className="mono" style={{ opacity: 0.95 }}>
+                          TS{diag.code}
+                        </span>
+                        <span className="mono" style={{ opacity: 0.72 }}>
+                          {diag.severity.toUpperCase()}
+                        </span>
                       </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Section>
-      </div>
+                      <div className="mutedText" title={diag.message}>
+                        {diag.message}
+                      </div>
+                      <div className="mutedText mono" title={location}>
+                        {location}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title={`Graph (${nodesLen} nodes · ${edgesLen} edges)`}
+            icon={<Network className="icon" />}
+          >
+            {analysis.graph ? (
+              <div className="kvList" style={{ gap: 8 }}>
+                <div className="kvRow">
+                  <div className="kvKey mono">nodes</div>
+                  <div className="kvVal mono">{nodesLen}</div>
+                </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">edges</div>
+                  <div className="kvVal mono">{edgesLen}</div>
+                </div>
+                {graphNodes.slice(0, 12).map((node) => (
+                  <button
+                    key={node.id}
+                    className="analysisInteractiveRow analysisInteractiveButton"
+                    type="button"
+                    onClick={() => activateNode(node.id)}
+                  >
+                    <span
+                      className="mono analysisInteractivePrimary"
+                      title={node.name}
+                    >
+                      {node.name}
+                    </span>
+                    <span className="mono analysisInteractiveMeta">{node.kind}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="mutedText">
+                No graph payload found in analysisResult.
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title={`Imports (${analysis.imports.length})`}
+            icon={<ArrowDownLeft className="icon" />}
+          >
+            {analysis.imports.length === 0 ? (
+              <div className="mutedText">No imports detected.</div>
+            ) : (
+              <div className="kvList">
+                {analysis.imports.slice(0, 30).map((imp, idx) => {
+                  const targetNode = findBestNodeByNames(
+                    graph,
+                    candidateNamesFromImport(imp.source, imp.specifiers),
+                  );
+                  return (
+                    <button
+                      className={[
+                        "analysisInteractiveButton",
+                        targetNode ? "analysisInteractiveRow" : "",
+                      ].join(" ")}
+                      type="button"
+                      key={`${imp.source}-${idx}`}
+                      onClick={() => {
+                        if (targetNode) activateNode(targetNode.id);
+                      }}
+                      disabled={!targetNode}
+                    >
+                      <div className="kvKey mono">{imp.source}</div>
+                      <div className="kvVal mono">
+                        {imp.kind === "side-effect"
+                          ? "(side-effect)"
+                          : imp.specifiers.length
+                            ? imp.specifiers.join(", ")
+                            : "(none)"}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title={`Exports (${analysis.exports.length})`}
+            icon={<ArrowUpRight className="icon" />}
+          >
+            {analysis.exports.length === 0 ? (
+              <div className="mutedText">No exports detected.</div>
+            ) : (
+              <div className="tagGrid">
+                {analysis.exports.slice(0, 40).map((ex, idx) => (
+                  <span className="tag" key={`${ex.name}-${idx}`}>
+                    <span className="tagKind">{ex.kind}</span>
+                    <span className="tagName mono">{ex.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title={`Calls (top ${Math.min(analysis.calls.length, 20)})`}
+            icon={<Sigma className="icon" />}
+          >
+            {analysis.calls.length === 0 ? (
+              <div className="mutedText">No calls detected.</div>
+            ) : (
+              <div className="kvList">
+                {analysis.calls.slice(0, 20).map((c, idx) => {
+                  const rawLabel = isCallV2(c) ? c.calleeName : c.name;
+                  const safeLabel =
+                    typeof rawLabel === "string" && rawLabel.trim().length > 0
+                      ? rawLabel
+                      : "(unknown)";
+
+                  let meta: string | null = null;
+                  if (isCallV2(c)) {
+                    if (c.declFile && c.declRange) {
+                      const s = c.declRange.start;
+                      meta = `${shortFile(c.declFile)}:${s.line + 1}:${s.character + 1}${
+                        c.isExternal ? " (External)" : ""
+                      }`;
+                    } else if (c.isExternal) {
+                      meta = "External";
+                    } else {
+                      meta = "Unresolved";
+                    }
+                  }
+
+                  const key = isCallV2(c)
+                    ? `${safeLabel}-${c.declFile ?? "null"}-${c.declRange?.start.line ?? "n"}-${idx}`
+                    : `${safeLabel}-${idx}`;
+
+                  return (
+                    <div
+                      className={[
+                        "kvRow",
+                        isCallV2(c) && c.declFile ? "analysisInteractiveRow" : "",
+                      ].join(" ")}
+                      key={key}
+                      style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                      onClick={() => {
+                        if (!isCallV2(c)) return;
+                        const targetNode = c.declFile
+                          ? findBestNodeByLocation(
+                              graph,
+                              c.declFile,
+                              c.declRange,
+                              candidateNamesFromCall(c),
+                            )
+                          : findBestNodeByNames(
+                              graph,
+                              candidateNamesFromCall(c),
+                            );
+                        if (targetNode) activateNode(targetNode.id);
+                      }}
+                      role={isCallV2(c) ? "button" : undefined}
+                      tabIndex={isCallV2(c) ? 0 : undefined}
+                      onKeyDown={(event) => {
+                        if (!isCallV2(c)) return;
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        const targetNode = c.declFile
+                          ? findBestNodeByLocation(
+                              graph,
+                              c.declFile,
+                              c.declRange,
+                              candidateNamesFromCall(c),
+                            )
+                          : findBestNodeByNames(
+                              graph,
+                              candidateNamesFromCall(c),
+                            );
+                        if (targetNode) activateNode(targetNode.id);
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          width: "100%",
+                        }}
+                      >
+                        <span
+                          className="mono"
+                          title={safeLabel}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {safeLabel}
+                        </span>
+
+                        <span className="mono" style={{ opacity: 0.75 }}>
+                          ()
+                        </span>
+
+                        <span className="mono" style={{ opacity: 0.9 }}>
+                          {c.count}
+                        </span>
+                      </div>
+
+                      {meta ? (
+                        <div className="mutedText mono" title={meta}>
+                          {meta}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -574,8 +666,8 @@ function Section({
   children,
 }: {
   title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
+  icon: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div>
