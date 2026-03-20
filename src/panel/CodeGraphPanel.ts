@@ -12,6 +12,17 @@ export class CodeGraphPanel {
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
   private suppressedAutoAnalysisUri: string | undefined;
+  private traceHighlightTimer: NodeJS.Timeout | undefined;
+  private readonly traceHighlightDecoration =
+    vscode.window.createTextEditorDecorationType({
+      backgroundColor: "rgba(56, 189, 248, 0.14)",
+      borderWidth: "1px",
+      borderStyle: "solid",
+      borderColor: "rgba(56, 189, 248, 0.55)",
+      overviewRulerColor: "rgba(56, 189, 248, 0.85)",
+      overviewRulerLane: vscode.OverviewRulerLane.Right,
+      rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+    });
 
   // cache workspace file list (ts/js)
   private cachedFilePaths: string[] = [];
@@ -156,6 +167,8 @@ export class CodeGraphPanel {
       subFs2.dispose();
       subFs3.dispose();
       if (this.analysisTimer) clearTimeout(this.analysisTimer);
+      if (this.traceHighlightTimer) clearTimeout(this.traceHighlightTimer);
+      this.traceHighlightDecoration.dispose();
     });
   }
 
@@ -443,6 +456,7 @@ export class CodeGraphPanel {
         );
         editor.selection = new vscode.Selection(r.start, r.end);
         editor.revealRange(r, vscode.TextEditorRevealType.InCenter);
+        this.flashTraceHighlight(editor, r);
       }
     } catch (e) {
       this.suppressedAutoAnalysisUri = undefined;
@@ -451,6 +465,22 @@ export class CodeGraphPanel {
         `CodeGraph: Failed to open location: ${filePath}`,
       );
     }
+  }
+
+  private flashTraceHighlight(editor: vscode.TextEditor, range: vscode.Range) {
+    for (const visibleEditor of vscode.window.visibleTextEditors) {
+      visibleEditor.setDecorations(this.traceHighlightDecoration, []);
+    }
+
+    editor.setDecorations(this.traceHighlightDecoration, [range]);
+
+    if (this.traceHighlightTimer) clearTimeout(this.traceHighlightTimer);
+    this.traceHighlightTimer = setTimeout(() => {
+      for (const visibleEditor of vscode.window.visibleTextEditors) {
+        visibleEditor.setDecorations(this.traceHighlightDecoration, []);
+      }
+      this.traceHighlightTimer = undefined;
+    }, 1200);
   }
 }
 

@@ -9,6 +9,7 @@ type AnalysisPayload = Extract<
 
 type Props = {
   analysis: AnalysisPayload;
+  className?: string;
 };
 
 type CallV1 = { name: string; count: number };
@@ -32,10 +33,10 @@ function shortFile(p: string) {
   return parts[parts.length - 1] || p;
 }
 
-export function AnalysisPanel({ analysis }: Props) {
+export function AnalysisPanel({ analysis, className }: Props) {
   if (!analysis) {
     return (
-      <div className="panel">
+      <div className={className ? `panel ${className}` : "panel"}>
         <div className="panelHeader">
           <span>ANALYSIS</span>
         </div>
@@ -52,7 +53,7 @@ export function AnalysisPanel({ analysis }: Props) {
   const edgesLen = analysis.graph?.edges?.length ?? 0;
 
   return (
-    <div className="panel">
+    <div className={className ? `panel ${className}` : "panel"}>
       <div className="panelHeader">
         <span>ANALYSIS</span>
         <span className="mono" style={{ opacity: 0.75 }}>

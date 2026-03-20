@@ -88,11 +88,71 @@ function inRange(pos: Pos, start: Pos, end: Pos) {
 function normalizePath(p: string) {
   return p.replace(/\\/g, "/");
 }
+function shortBaseName(p: string) {
+  const norm = normalizePath(p);
+  const parts = norm.split("/");
+  return parts[parts.length - 1] || p;
+}
 function uriToFsPath(uri: string): string {
   if (!uri.startsWith("file://")) return uri;
   let p = decodeURIComponent(uri.replace("file://", ""));
   if (p.match(/^\/[A-Za-z]:\//)) p = p.slice(1); // windows /C:/...
   return p;
+}
+
+type TracePreviewTarget = {
+  requestId: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  filePath: string;
+  range: GraphNode["range"];
+};
+
+function findGraphNode(
+  primary: GraphPayload | undefined,
+  secondary: GraphPayload | undefined,
+  id: string,
+) {
+  return primary?.nodes.find((n) => n.id === id) ?? secondary?.nodes.find((n) => n.id === id) ?? null;
+}
+
+function buildTracePreviewTarget(
+  event: GraphTraceEvent | null,
+  liveGraph: GraphPayload | undefined,
+  fullGraph: GraphPayload | undefined,
+  traceCursor: number,
+  traceTotal: number,
+): TracePreviewTarget | null {
+  if (!event) return null;
+
+  const stepLabel =
+    traceTotal > 0 ? `Step ${traceCursor} / ${traceTotal}` : `Step ${traceCursor}`;
+
+  if (event.type === "node") {
+    return {
+      requestId: `trace-node-${traceCursor}-${event.node.id}`,
+      title: `${stepLabel} · ${event.node.kind}`,
+      subtitle: `${event.node.name} · ${shortBaseName(event.node.file)}`,
+      description: "Current trace step is introducing this node into the graph.",
+      filePath: event.node.file,
+      range: event.node.range,
+    };
+  }
+
+  const sourceNode = findGraphNode(liveGraph, fullGraph, event.edge.source);
+  const targetNode = findGraphNode(liveGraph, fullGraph, event.edge.target);
+  const primaryNode = sourceNode ?? targetNode;
+  if (!primaryNode) return null;
+
+  return {
+    requestId: `trace-edge-${traceCursor}-${event.edge.id}`,
+    title: `${stepLabel} · ${event.edge.kind}`,
+    subtitle: `${sourceNode?.name ?? event.edge.source} -> ${targetNode?.name ?? event.edge.target}`,
+    description: "Current trace step is connecting these nodes. The preview shows the source-side code context.",
+    filePath: primaryNode.file,
+    range: primaryNode.range,
+  };
 }
 
 /** Pick the most specific node that contains selection.start (same file, smallest range). */
@@ -146,6 +206,8 @@ function downloadJson(filename: string, data: unknown) {
 
 type ToastKind = "info" | "success" | "error";
 type ToastState = { open: boolean; kind: ToastKind; message: string };
+type InspectorPlacement = "auto" | "right" | "bottom";
+type EffectiveInspectorPlacement = Exclude<InspectorPlacement, "auto">;
 
 export default function App() {
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
@@ -177,6 +239,9 @@ export default function App() {
   // Inspector UI
   const LS_INSPECTOR_OPEN = "cg.inspector.open";
   const LS_INSPECTOR_WIDTH = "cg.inspector.width";
+  const LS_INSPECTOR_HEIGHT = "cg.inspector.height";
+  const LS_INSPECTOR_PLACEMENT = "cg.inspector.placement";
+  const appRootRef = useRef<HTMLDivElement | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem(LS_INSPECTOR_OPEN);
@@ -193,6 +258,28 @@ export default function App() {
     } catch {
       return 360;
     }
+  });
+  const [inspectorHeight, setInspectorHeight] = useState<number>(() => {
+    try {
+      const v = localStorage.getItem(LS_INSPECTOR_HEIGHT);
+      const n = v ? Number(v) : 280;
+      return Number.isFinite(n) ? Math.min(520, Math.max(180, n)) : 280;
+    } catch {
+      return 280;
+    }
+  });
+  const [inspectorPlacement, setInspectorPlacement] =
+    useState<InspectorPlacement>(() => {
+      try {
+        const v = localStorage.getItem(LS_INSPECTOR_PLACEMENT);
+        return v === "right" || v === "bottom" ? v : "auto";
+      } catch {
+        return "auto";
+      }
+    });
+  const [appWidth, setAppWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 1280;
+    return window.innerWidth;
   });
   const [isResizingInspector, setIsResizingInspector] = useState(false);
 
@@ -228,6 +315,24 @@ export default function App() {
   useEffect(() => {
     graphRef.current = graphState;
   }, [graphState]);
+
+  useEffect(() => {
+    const root = appRootRef.current;
+    if (!root || typeof ResizeObserver === "undefined") return;
+
+    const updateWidth = (nextWidth?: number) => {
+      const width = nextWidth ?? root.clientWidth;
+      if (width > 0) setAppWidth(width);
+    };
+
+    updateWidth();
+
+    const observer = new ResizeObserver((entries) => {
+      updateWidth(entries[0]?.contentRect.width);
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
@@ -320,6 +425,22 @@ export default function App() {
   }, [inspectorWidth]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(LS_INSPECTOR_HEIGHT, String(inspectorHeight));
+    } catch (e) {
+      void e;
+    }
+  }, [inspectorHeight]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_INSPECTOR_PLACEMENT, inspectorPlacement);
+    } catch (e) {
+      void e;
+    }
+  }, [inspectorPlacement]);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName?.toLowerCase();
@@ -338,6 +459,13 @@ export default function App() {
   }, []);
 
   const clampInspectorWidth = (w: number) => Math.min(720, Math.max(260, w));
+  const clampInspectorHeight = (h: number) => Math.min(520, Math.max(180, h));
+  const effectiveInspectorPlacement: EffectiveInspectorPlacement =
+    inspectorPlacement === "auto"
+      ? appWidth <= 720
+        ? "bottom"
+        : "right"
+      : inspectorPlacement;
 
   const beginResizeInspector = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!inspectorOpen) return;
@@ -347,9 +475,17 @@ export default function App() {
     setIsResizingInspector(true);
 
     const startX = e.clientX;
+    const startY = e.clientY;
     const startWidth = inspectorWidth;
+    const startHeight = inspectorHeight;
 
     const onMove = (ev: PointerEvent) => {
+      if (effectiveInspectorPlacement === "bottom") {
+        const dy = startY - ev.clientY;
+        setInspectorHeight(clampInspectorHeight(startHeight + dy));
+        return;
+      }
+
       const dx = startX - ev.clientX;
       setInspectorWidth(clampInspectorWidth(startWidth + dx));
     };
@@ -369,6 +505,19 @@ export default function App() {
   const graph = graphState;
   const hasGraphData = Boolean(graph && graph.nodes.length > 0);
   const downloadEnabled = hasGraphData && downloadStatus !== "downloading";
+  const traceFocusEvent =
+    traceEvents && traceCursor > 0 ? traceEvents[traceCursor - 1] : null;
+  const tracePreviewTarget = useMemo(
+    () =>
+      buildTracePreviewTarget(
+        traceFocusEvent,
+        graph,
+        analysis?.graph,
+        traceCursor,
+        traceEvents?.length ?? 0,
+      ),
+    [analysis?.graph, graph, traceCursor, traceEvents, traceFocusEvent],
+  );
 
   const selectedNode: GraphNode | null = useMemo(() => {
     return findNodeById(graph, selectedNodeId);
@@ -447,10 +596,16 @@ export default function App() {
         ui: {
           activeFilter: activeChip,
           searchQuery,
-          rootNodeId,
-          selectedNodeId,
-          inspector: { open: inspectorOpen, width: inspectorWidth },
-        },
+            rootNodeId,
+            selectedNodeId,
+            inspector: {
+              open: inspectorOpen,
+              placement: inspectorPlacement,
+              effectivePlacement: effectiveInspectorPlacement,
+              width: inspectorWidth,
+              height: inspectorHeight,
+            },
+          },
         activeFile: activeFile
           ? {
               uri: activeFile.uri,
@@ -475,8 +630,21 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!traceEvents || !tracePreviewTarget) return;
+
+    vscode.postMessage({
+      type: "openLocation",
+      payload: {
+        filePath: tracePreviewTarget.filePath,
+        range: tracePreviewTarget.range,
+        preserveFocus: true,
+      },
+    });
+  }, [traceEvents, tracePreviewTarget]);
+
   return (
-    <div className="appRoot">
+    <div className="appRoot" ref={appRootRef}>
       <Topbar
         projectName={projectName}
         workspaceRootName={workspaceFiles?.rootName ?? null}
@@ -514,7 +682,13 @@ export default function App() {
 
       <FiltersBar active={activeChip} onChange={setActiveChip} />
 
-      <div className="main">
+      <div
+        className={[
+          "main",
+          `main--placement-${inspectorPlacement}`,
+          `main--effective-${effectiveInspectorPlacement}`,
+        ].join(" ")}
+      >
         <CanvasPane
           graph={graph}
           hasData={hasGraphData}
@@ -550,11 +724,7 @@ export default function App() {
           traceVisible={Boolean(traceEvents && traceEvents.length > 0)}
           traceCursor={traceCursor}
           traceTotal={traceEvents?.length ?? 0}
-          traceFocusEvent={
-            traceEvents && traceCursor > 0
-              ? traceEvents[traceCursor - 1]
-              : null
-          }
+          traceFocusEvent={traceFocusEvent}
           onTracePrev={stepTracePrev}
           onTraceNext={stepTraceNext}
           onTraceFinish={finishTraceMode}
@@ -565,20 +735,28 @@ export default function App() {
         {inspectorOpen ? (
           <div
             className={
-              isResizingInspector
-                ? "inspectorResizer isDragging"
-                : "inspectorResizer"
+              [
+                "inspectorResizer",
+                `inspectorResizer--${effectiveInspectorPlacement}`,
+                isResizingInspector ? "isDragging" : "",
+              ].join(" ").trim()
             }
             onPointerDown={beginResizeInspector}
             role="separator"
-            aria-orientation="vertical"
+            aria-orientation={
+              effectiveInspectorPlacement === "bottom" ? "horizontal" : "vertical"
+            }
             aria-label="Resize Inspector"
           />
         ) : null}
 
         <Inspector
           collapsed={!inspectorOpen}
+          placement={inspectorPlacement}
+          effectivePlacement={effectiveInspectorPlacement}
           width={inspectorWidth}
+          height={inspectorHeight}
+          onPlacementChange={setInspectorPlacement}
           onToggleCollapsed={() => setInspectorOpen((v) => !v)}
           activeFile={activeFile}
           selection={selection}

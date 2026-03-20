@@ -9,7 +9,7 @@
     min-width: 140px;
   }
 
-  .inspector {
+  .main.main--placement-auto .inspector {
     width: 280px;
     min-width: 220px;
   }
@@ -46,11 +46,11 @@
     height: 8px;
   }
 
-  .main {
+  .main.main--placement-auto {
     flex-direction: column;
   }
 
-  .inspector {
+  .main.main--placement-auto .inspector {
     width: 100%;
     max-width: none;
     min-width: 0;
@@ -60,7 +60,7 @@
     flex: 0 0 44vh;
   }
 
-  .canvas {
+  .main.main--placement-auto .canvas {
     flex: 1 1 auto;
   }
 }
@@ -93,7 +93,7 @@
     max-width: 360px;
   }
 
-  .inspector {
+  .main.main--placement-auto .inspector {
     width: 280px;
     min-width: 220px;
   }
@@ -101,7 +101,7 @@
 
 /* 좁은 폭: 캔버스 위 + 인스펙터 아래 (세로 스택) */
 @container app (max-width: 760px) {
-  .main {
+  .main.main--placement-auto {
     flex-direction: column;
     /* 핵심 */
   }
@@ -123,7 +123,7 @@
     height: 8px;
   }
 
-  .inspector {
+  .main.main--placement-auto .inspector {
     width: 100%;
     max-width: none;
     min-width: 0;
@@ -134,7 +134,7 @@
     flex: 0 0 clamp(220px, 40cqh, 420px);
   }
 
-  .canvas {
+  .main.main--placement-auto .canvas {
     flex: 1 1 auto;
     min-height: 200px;
     /* 너무 눌렸을 때 캔버스가 0 되는 것 방지 */
@@ -151,7 +151,7 @@
     height: 40px;
   }
 
-  .inspector {
+  .main.main--placement-auto .inspector {
     flex-basis: clamp(180px, 45cqh, 320px);
   }
 }

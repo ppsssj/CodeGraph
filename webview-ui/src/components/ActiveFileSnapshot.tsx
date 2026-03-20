@@ -7,6 +7,7 @@ type Props = {
   languageId?: string;
   text?: string;
   onRefresh: () => void;
+  className?: string;
 };
 
 function clipText(text: string, maxLines: number) {
@@ -21,11 +22,12 @@ export function ActiveFileSnapshot({
   languageId,
   text,
   onRefresh,
+  className,
 }: Props) {
   const body = text ? clipText(text, 200) : "";
 
   return (
-    <div className="panel">
+    <div className={className ? `panel ${className}` : "panel"}>
       <div className="panelHeader" style={{ gap: 10 }}>
         <span>{title}</span>
 

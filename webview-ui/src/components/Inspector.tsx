@@ -1,4 +1,11 @@
-import { ChevronLeft, ChevronRight, Settings } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Settings,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { ExtToWebviewMessage, GraphNode, GraphPayload } from "../lib/vscode";
 import { ActiveFileSnapshot } from "./ActiveFileSnapshot";
 import { AnalysisPanel } from "./AnalysisPanel";
@@ -16,6 +23,8 @@ type AnalysisPayload = Extract<
   ExtToWebviewMessage,
   { type: "analysisResult" }
 >["payload"];
+export type InspectorPlacement = "auto" | "right" | "bottom";
+export type EffectiveInspectorPlacement = Exclude<InspectorPlacement, "auto">;
 
 type Props = {
   activeFile: ActiveFilePayload;
@@ -33,6 +42,11 @@ type Props = {
   collapsed?: boolean;
   /** Width in px when expanded (App controls persistence). */
   width?: number;
+  /** Height in px when bottom-docked (App controls persistence). */
+  height?: number;
+  placement: InspectorPlacement;
+  effectivePlacement: EffectiveInspectorPlacement;
+  onPlacementChange: (placement: InspectorPlacement) => void;
   /** Toggle collapse/expand. */
   onToggleCollapsed?: () => void;
 };
@@ -85,8 +99,14 @@ export function Inspector({
 
   collapsed = false,
   width,
+  height,
+  placement,
+  effectivePlacement,
+  onPlacementChange,
   onToggleCollapsed,
 }: Props) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
   const nodeById = new Map((graph?.nodes ?? []).map((n) => [n.id, n]));
   const paramFlows = (graph?.edges ?? [])
     .filter((e) => e.kind === "dataflow")
@@ -101,11 +121,66 @@ export function Inspector({
       label: e.label ?? "(param flow)",
     }));
 
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!settingsRef.current?.contains(event.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [settingsOpen]);
+
+  const collapseIcon =
+    effectivePlacement === "bottom" ? (
+      <ChevronDown className="icon" />
+    ) : (
+      <ChevronRight className="icon" />
+    );
+  const expandIcon =
+    effectivePlacement === "bottom" ? (
+      <ChevronUp className="icon" />
+    ) : (
+      <ChevronLeft className="icon" />
+    );
+  const expandedStyle =
+    effectivePlacement === "bottom"
+      ? {
+          flexBasis: height ?? 280,
+          height: height ?? 280,
+          minHeight: 180,
+          maxHeight: 520,
+          width: "100%",
+          maxWidth: "none",
+        }
+      : width
+        ? { width }
+        : undefined;
+
   if (collapsed) {
     return (
       <aside
-        className="inspector inspector--collapsed"
-        style={{ width: 28, minWidth: 28, maxWidth: 28 }}
+        className={[
+          "inspector",
+          "inspector--collapsed",
+          `inspector--${effectivePlacement}`,
+        ].join(" ")}
+        style={
+          effectivePlacement === "bottom"
+            ? { height: 28, minHeight: 28, maxHeight: 28, width: "100%" }
+            : { width: 28, minWidth: 28, maxWidth: 28 }
+        }
         aria-label="Inspector (collapsed)"
       >
         <button
@@ -115,14 +190,17 @@ export function Inspector({
           title="Show Inspector (I)"
           aria-label="Show Inspector"
         >
-          <ChevronLeft className="icon" />
+          {expandIcon}
         </button>
       </aside>
     );
   }
 
   return (
-    <aside className="inspector" style={width ? { width } : undefined}>
+    <aside
+      className={["inspector", `inspector--${effectivePlacement}`].join(" ")}
+      style={expandedStyle}
+    >
       <div className="inspectorHeader">
         <div>
           <h1>Inspector</h1>
@@ -136,11 +214,69 @@ export function Inspector({
             title="Hide Inspector (I)"
             onClick={onToggleCollapsed}
           >
-            <ChevronRight className="icon" />
+            {collapseIcon}
           </button>
-          <button className="iconBtn subtle" type="button" title="Settings">
-            <Settings className="icon" />
-          </button>
+          <div className="inspectorSettingsWrap" ref={settingsRef}>
+            <button
+              className={[
+                "iconBtn",
+                "subtle",
+                settingsOpen ? "iconBtn--active" : "",
+              ].join(" ")}
+              type="button"
+              title="Inspector Settings"
+              aria-haspopup="menu"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              <Settings className="icon" />
+            </button>
+
+            {settingsOpen ? (
+              <div className="inspectorMenu" role="menu" aria-label="Inspector Settings">
+                <div className="inspectorMenuHeader">
+                  <span>Inspector Position</span>
+                  <span className="inspectorMenuHint">
+                    {placement === "auto"
+                      ? `Auto (${effectivePlacement})`
+                      : placement}
+                  </span>
+                </div>
+
+                {[
+                  ["auto", "Auto", "Follow window width"],
+                  ["right", "Right", "Keep inspector on the side"],
+                  ["bottom", "Bottom", "Keep inspector under the canvas"],
+                ].map(([value, label, description]) => {
+                  const active = placement === value;
+                  return (
+                    <button
+                      key={value}
+                      className={[
+                        "inspectorMenuOption",
+                        active ? "isActive" : "",
+                      ].join(" ")}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        onPlacementChange(value as InspectorPlacement);
+                        setSettingsOpen(false);
+                      }}
+                    >
+                      <span className="inspectorMenuOptionText">
+                        <strong>{label}</strong>
+                        <small>{description}</small>
+                      </span>
+                      <span className="inspectorMenuCheck" aria-hidden="true">
+                        {active ? "●" : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -166,6 +302,7 @@ export function Inspector({
       <div className="inspectorBody">
         <div className="inspectorPad">
           <ActiveFileSnapshot
+            className="panel--snapshot"
             fileName={activeFile?.fileName}
             languageId={activeFile?.languageId}
             text={activeFile?.text}
@@ -173,7 +310,7 @@ export function Inspector({
           />
 
           {/* ✅ Root node (optional) */}
-          <div className="panel">
+          <div className="panel panel--root">
             <div
               className="panelHeader"
               style={{ display: "flex", justifyContent: "space-between" }}
@@ -212,7 +349,7 @@ export function Inspector({
           </div>
 
           {/* ✅ Selected node details */}
-          <div className="panel">
+          <div className="panel panel--selected">
             <div className="panelHeader">
               <span>SELECTED NODE</span>
             </div>
@@ -252,7 +389,7 @@ export function Inspector({
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel panel--selection">
             <div className="panelHeader">
               <span>SELECTION</span>
             </div>
@@ -285,7 +422,7 @@ export function Inspector({
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel panel--flow">
             <div className="panelHeader">
               <span>PARAM FLOW</span>
             </div>
@@ -313,7 +450,7 @@ export function Inspector({
             </div>
           </div>
 
-          <AnalysisPanel analysis={analysis} />
+          <AnalysisPanel analysis={analysis} className="panel--analysis" />
         </div>
       </div>
     </aside>

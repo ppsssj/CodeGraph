@@ -14,6 +14,24 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
+}
+
+.inspector--right {
+  border-left: 1px solid var(--border);
+  border-top: none;
+}
+
+.inspector--bottom {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  border-left: none;
+  border-top: 1px solid var(--border);
+}
+
+.inspector--bottom .inspectorHeader {
+  padding: 10px 14px 8px;
 }
 
 .inspectorHeader {
@@ -48,6 +66,20 @@
   gap: 6px;
 }
 
+.inspectorSettingsWrap {
+  position: relative;
+}
+
+.inspectorActions {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
 .inspectorBody {
   flex: 1;
   overflow: auto;
@@ -59,6 +91,76 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.inspector--bottom .inspectorActions {
+  padding-top: 8px;
+}
+
+.inspector--bottom .inspectorBody {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+}
+
+.inspector--bottom .inspectorPad {
+  height: 100%;
+  min-width: max-content;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 14px 14px;
+}
+
+.inspector--bottom .inspectorPad > .panel {
+  flex: 0 0 clamp(280px, 24vw, 360px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  scroll-snap-align: start;
+}
+
+.inspector--bottom .inspectorPad > .panel .panelHeader {
+  flex: 0 0 auto;
+}
+
+.inspector--bottom .inspectorPad > .panel .panelBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.inspector--bottom .panel--snapshot {
+  flex-basis: clamp(380px, 34vw, 520px);
+}
+
+.inspector--bottom .panel--analysis {
+  flex-basis: clamp(340px, 30vw, 480px);
+}
+
+.inspector--bottom .panel--flow {
+  flex-basis: clamp(300px, 26vw, 400px);
+}
+
+.inspector--bottom .panel--root .kvRow,
+.inspector--bottom .panel--selected .kvRow {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.inspector--bottom .panel--root .kvVal,
+.inspector--bottom .panel--selected .kvVal {
+  max-width: 100%;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.inspector--bottom .panel pre {
+  max-height: none !important;
+  min-height: 132px;
 }
 
 .smallBtn {
@@ -84,6 +186,14 @@
   background: var(--panel);
 }
 
+.inspector--collapsed.inspector--bottom {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  border-left: none;
+  border-top: 1px solid var(--border);
+}
+
 .inspectorCollapsedBtn {
   width: 28px;
   height: 100%;
@@ -96,6 +206,11 @@
   cursor: pointer;
 }
 
+.inspector--bottom .inspectorCollapsedBtn {
+  width: 100%;
+  height: 28px;
+}
+
 .inspectorCollapsedBtn:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.06);
@@ -103,26 +218,132 @@
 
 /* Drag handle placed between canvas and inspector (App renders this div) */
 .inspectorResizer {
-  width: 6px;
-  cursor: col-resize;
   background: transparent;
   position: relative;
+  flex: 0 0 auto;
+}
+
+.inspectorResizer--right {
+  width: 6px;
+  cursor: col-resize;
+}
+
+.inspectorResizer--bottom {
+  height: 6px;
+  cursor: row-resize;
 }
 
 .inspectorResizer::after {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 2px;
-  width: 2px;
-  background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   opacity: 0;
   transition: opacity 120ms ease;
 }
 
+.inspectorResizer--right::after {
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.inspectorResizer--bottom::after {
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .inspectorResizer:hover::after,
 .inspectorResizer.isDragging::after {
   opacity: 1;
+}
+
+.iconBtn--active {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(2, 6, 23, 0.7);
+}
+
+.inspectorMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 240px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 94%, black);
+  box-shadow: var(--shadow);
+  z-index: 15;
+}
+
+.inspectorMenuHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 8px;
+}
+
+.inspectorMenuHeader span:first-child {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inspectorMenuHint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inspectorMenuOption {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.inspectorMenuOption:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.inspectorMenuOption.isActive {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.inspectorMenuOptionText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.inspectorMenuOptionText strong {
+  font-size: 12px;
+}
+
+.inspectorMenuOptionText small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inspectorMenuCheck {
+  width: 14px;
+  text-align: center;
+  color: #7dd3fc;
+  font-size: 10px;
 }

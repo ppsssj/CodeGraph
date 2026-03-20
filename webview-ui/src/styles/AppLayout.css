@@ -22,3 +22,16 @@
   min-height: 0;
   min-width: 0;
 }
+
+.main--effective-right {
+  flex-direction: row;
+}
+
+.main--effective-bottom {
+  flex-direction: column;
+}
+
+.main--effective-bottom .canvas {
+  flex: 1 1 auto;
+  min-height: 200px;
+}
