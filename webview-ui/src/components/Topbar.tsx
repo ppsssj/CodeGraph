@@ -29,7 +29,7 @@ type Props = {
   onRefresh: () => void;
   onGenerate: () => void;
   onAutoLayout: () => void;
-  onFitToScreen: () => void;
+  onFitGraph: () => void;
   traceMode: boolean;
   onToggleTraceMode: () => void;
   onExportJson: () => void;
@@ -50,7 +50,7 @@ export function Topbar({
   onRefresh,
   onGenerate,
   onAutoLayout,
-  onFitToScreen,
+  onFitGraph,
   traceMode,
   onToggleTraceMode,
   onExportJson,
@@ -261,9 +261,9 @@ export function Topbar({
 
         <button
           className="iconBtn"
-          title="Fit to Screen"
+          title="Fit Graph"
           type="button"
-          onClick={onFitToScreen}
+          onClick={onFitGraph}
         >
           <Maximize2 className="icon" />
         </button>

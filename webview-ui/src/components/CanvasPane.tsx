@@ -78,6 +78,54 @@ type FileGroupData = {
   count: number;
 };
 
+function fitGraphView(inst: ReactFlowInstance | null, duration = 400) {
+  if (!inst) return;
+  inst.fitView({ padding: 0.12, duration });
+}
+
+function focusCanvasNode(
+  inst: ReactFlowInstance | null,
+  node: Node<CodeNodeData | FileGroupData>,
+  zoom: number,
+  duration: number,
+) {
+  if (!inst) return;
+  inst.setCenter(
+    node.position.x + (node.width ?? 210) / 2,
+    node.position.y + (node.height ?? 72) / 2,
+    { zoom, duration },
+  );
+}
+
+function focusCanvasNodePair(
+  inst: ReactFlowInstance | null,
+  firstNode: Node<CodeNodeData | FileGroupData>,
+  secondNode: Node<CodeNodeData | FileGroupData>,
+  zoom: number,
+  duration: number,
+) {
+  if (!inst) return;
+
+  const firstWidth = firstNode.width ?? 210;
+  const firstHeight = firstNode.height ?? 72;
+  const secondWidth = secondNode.width ?? 210;
+  const secondHeight = secondNode.height ?? 72;
+  const centerX =
+    (firstNode.position.x +
+      firstWidth / 2 +
+      secondNode.position.x +
+      secondWidth / 2) /
+    2;
+  const centerY =
+    (firstNode.position.y +
+      firstHeight / 2 +
+      secondNode.position.y +
+      secondHeight / 2) /
+    2;
+
+  inst.setCenter(centerX, centerY, { zoom, duration });
+}
+
 function shortFile(p: string) {
   const parts = p.split(/[/\\]/);
   return parts[parts.length - 1] || p;
@@ -1076,7 +1124,7 @@ export function CanvasPane({
   onTraceNext,
   onTraceFinish,
   autoLayoutTick,
-  fitViewTick,
+  frameGraphTick,
 }: Props) {
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const filteredGraph = useMemo(
@@ -1161,31 +1209,22 @@ export function CanvasPane({
 
   const onZoomIn = () => rfRef.current?.zoomIn?.();
   const onZoomOut = () => rfRef.current?.zoomOut?.();
-  const onCenter = () => {
+  const onFocusSelection = () => {
     const inst = rfRef.current;
-    if (!inst) return;
+    if (!inst || !selectedNodeId) return;
 
-    if (selectedNodeId) {
-      const n = inst.getNode(selectedNodeId);
-      if (n) {
-        inst.setCenter(n.position.x, n.position.y, { zoom: 1.2 });
-        return;
-      }
-    }
-    inst.fitView({ padding: 0.12, duration: 400 });
+    const node = inst.getNode(selectedNodeId);
+    if (!node) return;
+    focusCanvasNode(inst, node, 1.2, 320);
   };
 
   useEffect(() => {
-    const inst = rfRef.current;
-    if (!inst) return;
-    inst.fitView({ padding: 0.12, duration: 350 });
-  }, [fitViewTick]);
+    fitGraphView(rfRef.current, 350);
+  }, [frameGraphTick]);
 
   useEffect(() => {
-    const inst = rfRef.current;
-    if (!inst) return;
-    // Current layout is deterministic; auto-layout trigger re-runs framing.
-    inst.fitView({ padding: 0.12, duration: 500 });
+    // Auto layout keeps its own role, but finishes by reframing the full graph.
+    fitGraphView(rfRef.current, 500);
   }, [autoLayoutTick]);
 
   useEffect(() => {
@@ -1195,13 +1234,7 @@ export function CanvasPane({
     if (traceFocusEvent.type === "node") {
       const rfNode = inst.getNode(traceFocusEvent.node.id);
       if (!rfNode) return;
-
-      const width = rfNode.width ?? 210;
-      const height = rfNode.height ?? 72;
-      inst.setCenter(rfNode.position.x + width / 2, rfNode.position.y + height / 2, {
-        zoom: 1.15,
-        duration: 350,
-      });
+      focusCanvasNode(inst, rfNode, 1.15, 350);
       return;
     }
 
@@ -1209,25 +1242,7 @@ export function CanvasPane({
     const targetNode = inst.getNode(traceFocusEvent.edge.target);
     if (!sourceNode || !targetNode) return;
 
-    const sourceWidth = sourceNode.width ?? 210;
-    const sourceHeight = sourceNode.height ?? 72;
-    const targetWidth = targetNode.width ?? 210;
-    const targetHeight = targetNode.height ?? 72;
-
-    const centerX =
-      (sourceNode.position.x +
-        sourceWidth / 2 +
-        targetNode.position.x +
-        targetWidth / 2) /
-      2;
-    const centerY =
-      (sourceNode.position.y +
-        sourceHeight / 2 +
-        targetNode.position.y +
-        targetHeight / 2) /
-      2;
-
-    inst.setCenter(centerX, centerY, { zoom: 0.9, duration: 350 });
+    focusCanvasNodePair(inst, sourceNode, targetNode, 0.9, 350);
   }, [nodes, traceCursor, traceFocusEvent, traceVisible]);
 
   useEffect(() => {
@@ -1240,32 +1255,13 @@ export function CanvasPane({
     if (!firstNode && !secondNode) return;
 
     if (firstNode && secondNode) {
-      const firstWidth = firstNode.width ?? 210;
-      const firstHeight = firstNode.height ?? 72;
-      const secondWidth = secondNode.width ?? 210;
-      const secondHeight = secondNode.height ?? 72;
-      const centerX =
-        (firstNode.position.x +
-          firstWidth / 2 +
-          secondNode.position.x +
-          secondWidth / 2) /
-        2;
-      const centerY =
-        (firstNode.position.y +
-          firstHeight / 2 +
-          secondNode.position.y +
-          secondHeight / 2) /
-        2;
-      inst.setCenter(centerX, centerY, { zoom: 1.05, duration: 320 });
+      focusCanvasNodePair(inst, firstNode, secondNode, 1.05, 320);
       return;
     }
 
     const node = firstNode ?? secondNode;
     if (!node) return;
-    inst.setCenter(node.position.x + (node.width ?? 210) / 2, node.position.y + (node.height ?? 72) / 2, {
-      zoom: 1.15,
-      duration: 320,
-    });
+    focusCanvasNode(inst, node, 1.15, 320);
   }, [highlightedEdgeId, visibleHighlightedNodeIds]);
 
   useEffect(() => {
@@ -1274,12 +1270,7 @@ export function CanvasPane({
 
     const node = inst.getNode(visibleInspectorFocusNodeId);
     if (!node) return;
-
-    inst.setCenter(
-      node.position.x + (node.width ?? 210) / 2,
-      node.position.y + (node.height ?? 72) / 2,
-      { zoom: 1.18, duration: 320 },
-    );
+    focusCanvasNode(inst, node, 1.18, 320);
   }, [inspectorFocusRequest, visibleInspectorFocusNodeId]);
 
   const isTraceAtEnd = traceCursor >= traceTotal;
@@ -1387,8 +1378,8 @@ export function CanvasPane({
               proOptions={{ hideAttribution: true }}
               onInit={(inst) => {
                 rfRef.current = inst;
-                // initial fit for better overview
-                inst.fitView({ padding: 0.12, duration: 250 });
+                // Initial mount frames the whole graph, same role as Fit Graph.
+                fitGraphView(inst, 250);
               }}
             >
               <Background gap={24} size={1} />
@@ -1404,15 +1395,20 @@ export function CanvasPane({
                 >
                   <ZoomOut size={16} />
                 </button>
-                <button className="iconBtn" onClick={onCenter} title="Center">
+                <button
+                  className="iconBtn"
+                  onClick={onFocusSelection}
+                  title={
+                    selectedNodeId ? "Focus Selection" : "Focus Selection (select a node first)"
+                  }
+                  disabled={!selectedNodeId}
+                >
                   <Crosshair size={16} />
                 </button>
                 <button
                   className="iconBtn"
-                  onClick={() =>
-                    rfRef.current?.fitView({ padding: 0.12, duration: 400 })
-                  }
-                  title="Fit view"
+                  onClick={() => fitGraphView(rfRef.current, 400)}
+                  title="Fit Graph"
                 >
                   <Network size={16} />
                 </button>
@@ -1535,5 +1531,5 @@ type Props = {
   onTraceNext: () => void;
   onTraceFinish: () => void;
   autoLayoutTick: number;
-  fitViewTick: number;
+  frameGraphTick: number;
 };

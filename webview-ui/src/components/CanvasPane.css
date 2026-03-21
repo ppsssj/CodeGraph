@@ -414,6 +414,17 @@
   background: rgba(2, 6, 23, 0.68);
 }
 
+.iconBtn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.iconBtn:disabled:hover {
+  transform: none;
+  border-color: rgba(226, 232, 240, 0.14);
+  background: rgba(2, 6, 23, 0.55);
+}
+
 /* Empty state */
 .emptyState {
   display: flex;

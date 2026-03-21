@@ -196,11 +196,12 @@
 }
 
 .inspector--bottom .panel.panel--collapsed .panelHeaderTitleText {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
+  writing-mode: vertical-lr;
+  text-orientation: upright;
+  transform: none;
   text-align: center;
   white-space: nowrap;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 
 .inspector--bottom .panel.panel--collapsed .panelHeaderActions,
