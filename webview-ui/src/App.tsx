@@ -41,6 +41,10 @@ type AnalysisPayload = Extract<
   ExtToWebviewMessage,
   { type: "analysisResult" }
 >["payload"];
+type AnalysisRequest = Extract<
+  ExtToWebviewMessage,
+  { type: "analysisResult" }
+>["request"];
 type FlowExportResultPayload = Extract<
   ExtToWebviewMessage,
   { type: "flowExportResult" }
@@ -422,6 +426,8 @@ export default function App() {
   // Keep latest values for selection-root logic
   const pendingRootRef = useRef(false);
   const graphRef = useRef<GraphPayload | undefined>(undefined);
+  const activeGraphGenerationRef = useRef(-1);
+  const latestActiveSequenceRef = useRef(0);
 
   useEffect(() => {
     pendingRootRef.current = pendingUseSelectionAsRoot;
@@ -515,38 +521,79 @@ export default function App() {
       }
 
       if (msg.type === "analysisResult") {
-        setAnalysis(msg.payload);
-
-        const g = msg.payload?.graph;
-        const trace = msg.payload?.trace;
-        const diagnosticsNotice = msg.payload?.diagnostics
-          ? summarizeDiagnostics(msg.payload.diagnostics)
+        const request: AnalysisRequest = msg.request;
+        const payload = msg.payload;
+        const diagnosticsNotice = payload?.diagnostics
+          ? summarizeDiagnostics(payload.diagnostics)
           : null;
-        if (trace && trace.length > 0) {
-          const maxEvents = 800;
-          const events = trace.slice(0, maxEvents);
-          setTraceEvents(events);
-          setTraceCursor(0);
-          setGraphState(undefined);
-          setSelectedNodeId(null);
-          setRootNodeId(null);
-          setCanvasNotice(diagnosticsNotice);
-          showToast("info", `Trace ready: 0 / ${events.length}`, 1500);
-        } else if (g) {
-          setTraceEvents(null);
-          setTraceCursor(0);
-          setGraphState((prev) => mergeGraph(prev, g));
-          setCanvasNotice(diagnosticsNotice);
-        }
 
-        if (!msg.payload) {
-          setTraceEvents(null);
-          setTraceCursor(0);
-          setGraphState(undefined);
+        if (request.lane === "active") {
+          if (request.sequence < latestActiveSequenceRef.current) {
+            console.debug("[codegraph] drop stale active result in webview", {
+              requestId: request.requestId,
+              generation: request.generation,
+              sequence: request.sequence,
+              latestAppliedSequence: latestActiveSequenceRef.current,
+            });
+            return;
+          }
+
+          latestActiveSequenceRef.current = request.sequence;
+          activeGraphGenerationRef.current = request.generation;
+          setAnalysis(payload);
+
+          if (!payload) {
+            activeGraphGenerationRef.current = -1;
+            setTraceEvents(null);
+            setTraceCursor(0);
+            setGraphState(undefined);
+            expandedFilesRef.current.clear();
+            setSelectedNodeId(null);
+            setFocusedFlow(null);
+            setInspectorFocusRequest(null);
+            setRootNodeId(null);
+            setCanvasNotice(null);
+            return;
+          }
+
+          const g = payload.graph;
+          const trace = payload.trace;
           expandedFilesRef.current.clear();
           setSelectedNodeId(null);
+          setFocusedFlow(null);
+          setInspectorFocusRequest(null);
           setRootNodeId(null);
-          setCanvasNotice(null);
+
+          if (trace && trace.length > 0) {
+            const maxEvents = 800;
+            const events = trace.slice(0, maxEvents);
+            setTraceEvents(events);
+            setTraceCursor(0);
+            setGraphState(undefined);
+            setCanvasNotice(diagnosticsNotice);
+            showToast("info", `Trace ready: 0 / ${events.length}`, 1500);
+            return;
+          }
+
+          setTraceEvents(null);
+          setTraceCursor(0);
+          setGraphState(g);
+          setCanvasNotice(diagnosticsNotice);
+          return;
+        }
+
+        if (request.generation !== activeGraphGenerationRef.current) {
+          console.debug("[codegraph] drop stale expand result in webview", {
+            requestId: request.requestId,
+            generation: request.generation,
+            activeGeneration: activeGraphGenerationRef.current,
+          });
+          return;
+        }
+
+        if (payload?.graph) {
+          setGraphState((prev) => mergeGraph(prev, payload.graph));
+          setCanvasNotice(diagnosticsNotice);
         }
       }
     };
@@ -681,6 +728,7 @@ export default function App() {
     activeFile?.fileName?.replace(/[^\w.-]+/g, "_")?.slice(0, 64) || "codegraph";
 
   const resetGraph = () => {
+    activeGraphGenerationRef.current = -1;
     setTraceEvents(null);
     setTraceCursor(0);
     setGraphState(undefined);
@@ -727,7 +775,16 @@ export default function App() {
     if (!filePath) return;
     if (expandedFilesRef.current.has(filePath)) return;
     expandedFilesRef.current.add(filePath);
-    vscode.postMessage({ type: "expandNode", payload: { filePath } });
+    vscode.postMessage({
+      type: "expandNode",
+      payload: {
+        filePath,
+        generation:
+          activeGraphGenerationRef.current >= 0
+            ? activeGraphGenerationRef.current
+            : undefined,
+      },
+    });
   };
 
   const openDiagnostic = (diagnostic: CodeDiagnostic) => {

@@ -2,9 +2,11 @@
 import "reactflow/dist/style.css";
 import "./CanvasPane.css";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
+  startTransition,
   useState,
   type MouseEvent as ReactMouseEvent,
   type MouseEvent as ReactDomMouseEvent,
@@ -554,12 +556,15 @@ function toReactFlowEdges(
 ): Array<Edge<DataflowEdgeData>> {
   if (!graph) return [];
 
+  const existingNodeIds = new Set(graph.nodes.map((n) => n.id));
   const collapsedNodeIds = new Set(
-    graph.nodes.filter((n) => n.parentId).map((n) => n.id),
+    graph.nodes
+      .filter((n) => n.parentId && existingNodeIds.has(n.parentId))
+      .map((n) => n.id),
   );
   const parentIdByNodeId = new Map(
     graph.nodes
-      .filter((n) => n.parentId)
+      .filter((n) => n.parentId && existingNodeIds.has(n.parentId))
       .map((n) => [n.id, n.parentId as string]),
   );
 
@@ -585,7 +590,7 @@ function toReactFlowEdges(
   const visibleEdges = [...dedupedEdges.values()].filter((e) => {
     const src = nodeById.get(e.source);
     const tgt = nodeById.get(e.target);
-    if (!src || !tgt) return true;
+    if (!src || !tgt) return false;
 
     // File container edges are noisy and often visually occluded by the group frame.
     // Keep file node as a visual header only.
@@ -970,6 +975,7 @@ function toReactFlowNodes(
 ): Array<Node<CodeNodeData | FileGroupData>> {
   if (!graph) return [];
   const orderedFocusPulseRequests = [...(focusPulseRequests ?? [])].reverse();
+  const existingNodeIds = new Set(graph.nodes.map((n) => n.id));
 
   // Reuse existing file-node ids if analyzer already created them.
   const fileNodeByPath = new Map<string, GraphNode>();
@@ -980,6 +986,7 @@ function toReactFlowNodes(
   const childItemsByParentId = new Map<string, GraphNode[]>();
   for (const n of graph.nodes) {
     if (!n.parentId) continue;
+    if (!existingNodeIds.has(n.parentId)) continue;
     if (!childItemsByParentId.has(n.parentId)) childItemsByParentId.set(n.parentId, []);
     childItemsByParentId.get(n.parentId)!.push(n);
   }
@@ -990,7 +997,7 @@ function toReactFlowNodes(
   const byFile = new Map<string, GraphNode[]>();
   for (const n of graph.nodes) {
     if (n.kind === "file") continue; // file is rendered as a container only
-    if (n.parentId) continue;
+    if (n.parentId && existingNodeIds.has(n.parentId)) continue;
     const key = n.file;
     if (!byFile.has(key)) byFile.set(key, []);
     byFile.get(key)!.push(n);
@@ -1165,6 +1172,7 @@ export function CanvasPane({
   frameGraphTick,
 }: Props) {
   const rfRef = useRef<ReactFlowInstance | null>(null);
+  const canvasActivationTimerRef = useRef<number | null>(null);
   const [focusPulseRequest, setFocusPulseRequest] = useState<{
     nodeId: string;
     visibleNodeId: string;
@@ -1180,9 +1188,10 @@ export function CanvasPane({
   );
   const visibleHighlightedNodeIds = useMemo(() => {
     if (!graph || !highlightedNodeIds?.length) return new Set<string>();
+    const existingNodeIds = new Set(graph.nodes.map((node) => node.id));
     const parentIdByNodeId = new Map(
       graph.nodes
-        .filter((node) => node.parentId)
+        .filter((node) => node.parentId && existingNodeIds.has(node.parentId))
         .map((node) => [node.id, node.parentId as string]),
     );
     return new Set(
@@ -1193,13 +1202,15 @@ export function CanvasPane({
     if (!graph || !inspectorFocusRequest?.nodeId) return null;
     const target = graph.nodes.find((node) => node.id === inspectorFocusRequest.nodeId);
     if (!target) return null;
-    return target.parentId ?? target.id;
+    const hasParent = Boolean(target.parentId && graph.nodes.some((node) => node.id === target.parentId));
+    return hasParent ? (target.parentId as string) : target.id;
   }, [graph, inspectorFocusRequest]);
   const visibleSelectedNodeId = useMemo(() => {
     if (!graph || !selectedNodeId) return selectedNodeId;
     const target = graph.nodes.find((node) => node.id === selectedNodeId);
     if (!target) return selectedNodeId;
-    return target.parentId ?? target.id;
+    const hasParent = Boolean(target.parentId && graph.nodes.some((node) => node.id === target.parentId));
+    return hasParent ? (target.parentId as string) : target.id;
   }, [graph, selectedNodeId]);
   const inspectorPulseRequest = useMemo(() => {
     if (!inspectorFocusRequest || !visibleInspectorFocusNodeId) return null;
@@ -1222,6 +1233,58 @@ export function CanvasPane({
       ),
     [focusPulseRequest, inspectorPulseRequest],
   );
+  const scheduleCanvasNodeActivation = useCallback(
+    (nodeId: string, visibleNodeId: string) => {
+      const target = graph?.nodes.find((node) => node.id === nodeId);
+
+      setFocusPulseRequest((current) => ({
+        nodeId,
+        visibleNodeId,
+        token: (current?.token ?? 0) + 1,
+      }));
+
+      startTransition(() => {
+        onSelectNode(nodeId);
+      });
+
+      if (!target) return;
+
+      if (canvasActivationTimerRef.current) {
+        window.clearTimeout(canvasActivationTimerRef.current);
+      }
+
+      canvasActivationTimerRef.current = window.setTimeout(() => {
+        onOpenNode?.(target);
+        if (target.kind === "external") {
+          onExpandExternal?.(target.file);
+        }
+        canvasActivationTimerRef.current = null;
+      }, 0);
+    },
+    [graph, onExpandExternal, onOpenNode, onSelectNode],
+  );
+  const activateEmbeddedNode = useCallback(
+    (nodeId: string, visibleNodeId: string) => {
+      const target = graph?.nodes.find((node) => node.id === nodeId);
+
+      setFocusPulseRequest((current) => ({
+        nodeId,
+        visibleNodeId,
+        token: (current?.token ?? 0) + 1,
+      }));
+
+      startTransition(() => {
+        onSelectNode(nodeId);
+      });
+
+      if (!target) return;
+      onOpenNode?.(target);
+      if (target.kind === "external") {
+        onExpandExternal?.(target.file);
+      }
+    },
+    [graph, onExpandExternal, onOpenNode, onSelectNode],
+  );
 
   const nodes = useMemo<Array<Node<CodeNodeData | FileGroupData>>>(
     () =>
@@ -1235,36 +1298,44 @@ export function CanvasPane({
         (nodeId) => {
           const target = graph?.nodes.find((node) => node.id === nodeId);
           const visibleNodeId = target?.parentId ?? nodeId;
-          setFocusPulseRequest((current) => ({
-            nodeId,
-            visibleNodeId,
-            token: (current?.token ?? 0) + 1,
-          }));
-          if (!target) return;
-          onSelectNode(nodeId);
-          onOpenNode?.(target);
-          if (target.kind === "external") {
-            onExpandExternal?.(target.file);
-          }
+          activateEmbeddedNode(nodeId, visibleNodeId);
         },
       ),
     [
+      activateEmbeddedNode,
       analysisDiagnostics,
       filteredGraph,
       graph,
-      onExpandExternal,
-      onOpenNode,
-      onSelectNode,
       selectedNodeId,
       searchHitIds,
       focusPulseRequests,
       visibleHighlightedNodeIds,
     ],
   );
+  const nodeTopologyKey = useMemo(
+    () =>
+      nodes
+        .map((node) => `${node.id}:${node.parentNode ?? ""}`)
+        .sort()
+        .join("|"),
+    [nodes],
+  );
 
   const edges = useMemo<Array<Edge<DataflowEdgeData>>>(
     () => toReactFlowEdges(filteredGraph, selectedNodeId, highlightedEdgeId),
     [filteredGraph, highlightedEdgeId, selectedNodeId],
+  );
+  const edgeTopologyKey = useMemo(
+    () =>
+      edges
+        .map((edge) => `${edge.id}:${edge.source}->${edge.target}`)
+        .sort()
+        .join("|"),
+    [edges],
+  );
+  const reactFlowTopologyKey = useMemo(
+    () => `${nodeTopologyKey}__${edgeTopologyKey}`,
+    [edgeTopologyKey, nodeTopologyKey],
   );
 
   const visibleHasData = nodes.length > 0;
@@ -1273,23 +1344,8 @@ export function CanvasPane({
     _event: ReactMouseEvent,
     node: Node<CodeNodeData | FileGroupData>,
   ) => {
-    setFocusPulseRequest((current) => ({
-      nodeId: node.id,
-      visibleNodeId: node.id,
-      token: (current?.token ?? 0) + 1,
-    }));
-    onSelectNode(node.id);
-
-    // File containers do not map to a code location.
     if (node.data?.kind === "file") return;
-
-    // Open source location for the clicked graph node (if available)
-    const gnode = graph?.nodes.find((n) => n.id === node.id);
-    if (gnode) onOpenNode?.(gnode);
-
-    if (node.data.kind === "external") {
-      onExpandExternal?.(node.data.file);
-    }
+    scheduleCanvasNodeActivation(node.id, node.id);
   };
 
   const onZoomIn = () => rfRef.current?.zoomIn?.();
@@ -1304,8 +1360,30 @@ export function CanvasPane({
   };
 
   useEffect(() => {
+    return () => {
+      if (canvasActivationTimerRef.current) {
+        window.clearTimeout(canvasActivationTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    rfRef.current = null;
+  }, [reactFlowTopologyKey]);
+
+  useEffect(() => {
     fitGraphView(rfRef.current, 350);
   }, [frameGraphTick]);
+
+  useEffect(() => {
+    if (!visibleHasData) return;
+
+    const rafId = window.requestAnimationFrame(() => {
+      fitGraphView(rfRef.current, 280);
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [nodeTopologyKey, visibleHasData]);
 
   useEffect(() => {
     // Auto layout keeps its own role, but finishes by reframing the full graph.
@@ -1359,6 +1437,43 @@ export function CanvasPane({
   }, [inspectorFocusRequest, visibleInspectorFocusNodeId]);
 
   const isTraceAtEnd = traceCursor >= traceTotal;
+  const renderEmptyState = (mode: "no-graph" | "no-visible") => (
+    <div className={["emptyState", mode === "no-visible" ? "emptyState--overlay" : ""].join(" ")}>
+      {notice && mode === "no-graph" ? (
+        <div
+          className={[
+            "canvasNotice",
+            "canvasNotice--inline",
+            `canvasNotice--${notice.severity}`,
+          ].join(" ")}
+        >
+          <div className="canvasNoticeTitle">{notice.message}</div>
+          {notice.detail ? (
+            <div className="canvasNoticeDetail">{notice.detail}</div>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="emptyIcon">
+        <Sigma size={20} />
+      </div>
+      <div className="emptyTitle">
+        {mode === "no-visible" ? "No visible nodes" : "No graph yet"}
+      </div>
+      <div className="emptySub">
+        {mode === "no-visible"
+          ? "Graph data exists, but the current render pass found no visible nodes."
+          : "Open a TypeScript/JavaScript file, then click Generate."}
+      </div>
+      <div className="emptyActions">
+        <button className="btnPrimary" onClick={onGenerateFromActive}>
+          Generate from active file
+        </button>
+      </div>
+      {traceVisible ? (
+        <div style={{ marginTop: 8 }}>{renderTraceControls()}</div>
+      ) : null}
+    </div>
+  );
   const renderTraceControls = () => (
     <div
       style={{
@@ -1408,46 +1523,13 @@ export function CanvasPane({
 
   return (
     <section className="canvas">
-      {!hasData || !visibleHasData ? (
-        <div className="emptyState">
-          {notice ? (
-            <div
-              className={[
-                "canvasNotice",
-                "canvasNotice--inline",
-                `canvasNotice--${notice.severity}`,
-              ].join(" ")}
-            >
-              <div className="canvasNoticeTitle">{notice.message}</div>
-              {notice.detail ? (
-                <div className="canvasNoticeDetail">{notice.detail}</div>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="emptyIcon">
-            <Sigma size={20} />
-          </div>
-          <div className="emptyTitle">
-            {hasData ? "No visible nodes" : "No graph yet"}
-          </div>
-          <div className="emptySub">
-            {hasData
-              ? "Try a different filter."
-              : "Open a TypeScript/JavaScript file, then click Generate."}
-          </div>
-          <div className="emptyActions">
-            <button className="btnPrimary" onClick={onGenerateFromActive}>
-              Generate from active file
-            </button>
-          </div>
-          {traceVisible ? (
-            <div style={{ marginTop: 8 }}>{renderTraceControls()}</div>
-          ) : null}
-        </div>
+      {!hasData ? (
+        renderEmptyState("no-graph")
       ) : (
         <div className="canvasFlow">
-          <ReactFlowProvider>
+          <ReactFlowProvider key={`provider:${reactFlowTopologyKey}`}>
             <ReactFlow
+              key={`flow:${reactFlowTopologyKey}`}
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
@@ -1578,6 +1660,7 @@ export function CanvasPane({
               </div>
             </ReactFlow>
           </ReactFlowProvider>
+          {!visibleHasData ? renderEmptyState("no-visible") : null}
         </div>
       )}
     </section>

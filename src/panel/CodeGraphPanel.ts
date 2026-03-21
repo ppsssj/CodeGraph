@@ -3,6 +3,8 @@ import * as path from "path";
 import { getWebviewHtml } from "../webview/html";
 import { analyzeWorkspaceActive } from "../analyzer";
 import type {
+  AnalysisRequestMeta,
+  AnalysisRequestReason,
   ExtToWebviewMessage,
   UINotice,
   WebviewToExtMessage,
@@ -12,7 +14,10 @@ export class CodeGraphPanel {
   private lastTextEditor: vscode.TextEditor | undefined;
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
-  private suppressedAutoAnalysisUri: string | undefined;
+  private readonly suppressedAutoAnalysisUris = new Map<string, number>();
+  private analysisGeneration = 0;
+  private analysisSequence = 0;
+  private latestActiveAnalysisSequence = 0;
   private traceHighlightTimer: NodeJS.Timeout | undefined;
   private readonly traceHighlightDecoration =
     vscode.window.createTextEditorDecorationType({
@@ -65,13 +70,19 @@ export class CodeGraphPanel {
             return await this.postWorkspaceFiles();
           if (msg.type === "requestSelection") return this.postSelection();
           if (msg.type === "analyzeActiveFile")
-            return await this.postAnalysis(Boolean(msg.payload?.traceMode)); // workspace-aware
+            return await this.postAnalysis(
+              Boolean(msg.payload?.traceMode),
+              msg.payload?.traceMode ? "trace" : "manual",
+            ); // workspace-aware
           if (msg.type === "analyzeWorkspace")
-            return await this.postAnalysis(); // explicit
+            return await this.postAnalysis(false, "manual"); // explicit
           if (msg.type === "selectWorkspaceFile")
             return await this.selectWorkspaceFile(msg.payload.filePath);
           if (msg.type === "expandNode")
-            return await this.postAnalysisForFile(msg.payload.filePath);
+            return await this.postAnalysisForFile(
+              msg.payload.filePath,
+              msg.payload.generation,
+            );
           if (msg.type === "saveExportFile")
             return await this.saveExportFile(msg.payload);
           if (msg.type === "openLocation")
@@ -95,7 +106,7 @@ export class CodeGraphPanel {
       if (this.analysisTimer) clearTimeout(this.analysisTimer);
       this.analysisTimer = setTimeout(
         () => {
-          void this.postAnalysis().catch((e) => {
+          void this.postAnalysis(false, "auto").catch((e) => {
             console.error("[codegraph] auto-analysis error:", e);
             this.postNotice(
               "canvas",
@@ -118,15 +129,10 @@ export class CodeGraphPanel {
       this.postActiveFile();
       void this.postWorkspaceFiles();
 
-      if (
-        editor &&
-        this.suppressedAutoAnalysisUri === editor.document.uri.toString()
-      ) {
-        this.suppressedAutoAnalysisUri = undefined;
+      if (editor && this.consumeSuppressedAutoAnalysis(editor.document.uri.toString())) {
         return;
       }
 
-      this.suppressedAutoAnalysisUri = undefined;
       scheduleAnalysis(0);
     });
 
@@ -185,6 +191,50 @@ export class CodeGraphPanel {
   private invalidateWorkspaceCache() {
     this.cachedAt = 0;
     this.cachedFilePaths = [];
+  }
+
+  private suppressAutoAnalysis(uri: string) {
+    const count = this.suppressedAutoAnalysisUris.get(uri) ?? 0;
+    this.suppressedAutoAnalysisUris.set(uri, count + 1);
+  }
+
+  private consumeSuppressedAutoAnalysis(uri: string) {
+    const count = this.suppressedAutoAnalysisUris.get(uri) ?? 0;
+    if (count <= 0) return false;
+
+    if (count === 1) {
+      this.suppressedAutoAnalysisUris.delete(uri);
+    } else {
+      this.suppressedAutoAnalysisUris.set(uri, count - 1);
+    }
+
+    return true;
+  }
+
+  private beginActiveAnalysis(reason: AnalysisRequestReason): AnalysisRequestMeta {
+    const generation = ++this.analysisGeneration;
+    const sequence = ++this.analysisSequence;
+    this.latestActiveAnalysisSequence = sequence;
+    return {
+      lane: "active",
+      reason,
+      requestId: `active-${generation}-${sequence}`,
+      generation,
+      sequence,
+      startedAt: new Date().toISOString(),
+    };
+  }
+
+  private beginExpandAnalysis(generation = this.analysisGeneration): AnalysisRequestMeta {
+    const sequence = ++this.analysisSequence;
+    return {
+      lane: "expand",
+      reason: "expand",
+      requestId: `expand-${generation}-${sequence}`,
+      generation,
+      sequence,
+      startedAt: new Date().toISOString(),
+    };
   }
 
   private invalidateAndPostWorkspaceFiles() {
@@ -345,12 +395,17 @@ export class CodeGraphPanel {
     this.panel.webview.postMessage(message);
   }
 
-  private async postAnalysis(traceMode = false) {
+  private async postAnalysis(
+    traceMode = false,
+    reason: AnalysisRequestReason = "manual",
+  ) {
+    const request = this.beginActiveAnalysis(reason);
     const editor = this.getEditor();
     if (!editor) {
       this.panel.webview.postMessage({
         type: "analysisResult",
         payload: null,
+        request,
       } satisfies ExtToWebviewMessage);
       return;
     }
@@ -391,6 +446,17 @@ export class CodeGraphPanel {
       meta: result.meta,
     };
 
+    if (request.sequence !== this.latestActiveAnalysisSequence) {
+      console.debug("[codegraph] drop stale active analysis response", {
+        requestId: request.requestId,
+        generation: request.generation,
+        sequence: request.sequence,
+        latestActiveSequence: this.latestActiveAnalysisSequence,
+        file: doc.fileName,
+      });
+      return;
+    }
+
     console.log("[analysis.meta]", result.meta);
     console.log(
       "[analysis.graph counts]",
@@ -403,10 +469,21 @@ export class CodeGraphPanel {
     this.panel.webview.postMessage({
       type: "analysisResult",
       payload,
+      request,
     } satisfies ExtToWebviewMessage);
   }
 
-  private async postAnalysisForFile(filePath: string) {
+  private async postAnalysisForFile(filePath: string, generation?: number) {
+    if (generation !== undefined && generation !== this.analysisGeneration) {
+      console.debug("[codegraph] skip stale expand request", {
+        file: filePath,
+        requestGeneration: generation,
+        currentGeneration: this.analysisGeneration,
+      });
+      return;
+    }
+
+    const request = this.beginExpandAnalysis(generation ?? this.analysisGeneration);
     const workspaceRoot = this.getWorkspaceRoot();
     const filePaths = await this.getWorkspaceFilePaths();
 
@@ -441,9 +518,20 @@ export class CodeGraphPanel {
       meta: result.meta,
     };
 
+    if (request.generation !== this.analysisGeneration) {
+      console.debug("[codegraph] drop stale expand analysis response", {
+        requestId: request.requestId,
+        generation: request.generation,
+        currentGeneration: this.analysisGeneration,
+        file: filePath,
+      });
+      return;
+    }
+
     this.panel.webview.postMessage({
       type: "analysisResult",
       payload,
+      request,
     } satisfies ExtToWebviewMessage);
   }
 
@@ -463,7 +551,7 @@ export class CodeGraphPanel {
 
     this.postActiveFile();
     this.postSelection();
-    await this.postAnalysis();
+    await this.postAnalysis(false, "select-file");
   }
 
   private async saveExportFile(payload: {
@@ -534,7 +622,7 @@ export class CodeGraphPanel {
       const uri = vscode.Uri.file(filePath);
       if (!preserveFocus) {
         // Graph-click navigation should not replace the current graph via auto-analysis.
-        this.suppressedAutoAnalysisUri = uri.toString();
+        this.suppressAutoAnalysis(uri.toString());
       }
 
       // 1) 이미 화면에 떠 있는(visible) editor가 있으면 그 editor를 재사용
@@ -572,7 +660,6 @@ export class CodeGraphPanel {
         this.flashTraceHighlight(editor, r);
       }
     } catch (e) {
-      this.suppressedAutoAnalysisUri = undefined;
       console.error("[codegraph] openLocation error:", e);
       this.postNotice(
         "toast",

@@ -5,7 +5,7 @@ export type WebviewToExtMessage =
   | { type: "analyzeActiveFile"; payload?: { traceMode?: boolean } }
   | { type: "analyzeWorkspace" }
   | { type: "selectWorkspaceFile"; payload: { filePath: string } }
-  | { type: "expandNode"; payload: { filePath: string } }
+  | { type: "expandNode"; payload: { filePath: string; generation?: number } }
   | {
       type: "saveExportFile";
       payload: {
@@ -135,6 +135,23 @@ export type AnalyzerMeta =
       projectRoot?: string;
     };
 
+export type AnalysisRequestLane = "active" | "expand";
+export type AnalysisRequestReason =
+  | "manual"
+  | "auto"
+  | "select-file"
+  | "trace"
+  | "expand";
+
+export type AnalysisRequestMeta = {
+  lane: AnalysisRequestLane;
+  reason: AnalysisRequestReason;
+  requestId: string;
+  generation: number;
+  sequence: number;
+  startedAt: string;
+};
+
 export type ExtToWebviewMessage =
   | {
       type: "activeFile";
@@ -197,6 +214,7 @@ export type ExtToWebviewMessage =
 
         meta?: AnalyzerMeta;
       } | null;
+      request: AnalysisRequestMeta;
     }
   | {
       type: "uiNotice";

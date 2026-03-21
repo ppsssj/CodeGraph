@@ -7,6 +7,7 @@
 // NOTE: Adjust the relative import path if your webview source lives in a different folder.
 
 export type {
+  AnalysisRequestMeta,
   CodeDiagnostic,
   WebviewToExtMessage,
   ExtToWebviewMessage,
