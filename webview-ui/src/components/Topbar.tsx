@@ -5,7 +5,6 @@ import {
   GitBranch,
   LayoutGrid,
   Loader2,
-  Maximize2,
   Play,
   RefreshCw,
   Search,
@@ -29,7 +28,6 @@ type Props = {
   onRefresh: () => void;
   onGenerate: () => void;
   onAutoLayout: () => void;
-  onFitGraph: () => void;
   traceMode: boolean;
   onToggleTraceMode: () => void;
   onExportJson: () => void;
@@ -50,7 +48,6 @@ export function Topbar({
   onRefresh,
   onGenerate,
   onAutoLayout,
-  onFitGraph,
   traceMode,
   onToggleTraceMode,
   onExportJson,
@@ -257,15 +254,6 @@ export function Topbar({
           onClick={onAutoLayout}
         >
           <LayoutGrid className="icon" />
-        </button>
-
-        <button
-          className="iconBtn"
-          title="Fit Graph"
-          type="button"
-          onClick={onFitGraph}
-        >
-          <Maximize2 className="icon" />
         </button>
 
         <div className="exportMenuWrap" ref={exportRef}>

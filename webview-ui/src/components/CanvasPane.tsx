@@ -1204,7 +1204,6 @@ export function CanvasPane({
   onTraceNext,
   onTraceFinish,
   autoLayoutTick,
-  frameGraphTick,
 }: Props) {
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const canvasFlowRef = useRef<HTMLDivElement | null>(null);
@@ -1556,11 +1555,6 @@ export function CanvasPane({
       clearSnapshotTimers();
     };
   }, [clearSnapshotTimers]);
-
-  useEffect(() => {
-    if (!ENABLE_AUTO_VIEWPORT_EFFECTS) return;
-    fitGraphView(rfRef.current, 350);
-  }, [frameGraphTick]);
 
   useEffect(() => {
     if (!ENABLE_AUTO_VIEWPORT_EFFECTS) return;
@@ -1957,5 +1951,4 @@ type Props = {
   onTraceNext: () => void;
   onTraceFinish: () => void;
   autoLayoutTick: number;
-  frameGraphTick: number;
 };

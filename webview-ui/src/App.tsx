@@ -338,7 +338,6 @@ export default function App() {
   const [traceEvents, setTraceEvents] = useState<GraphTraceEvent[] | null>(null);
   const [traceCursor, setTraceCursor] = useState(0);
   const [autoLayoutTick, setAutoLayoutTick] = useState(0);
-  const [frameGraphTick, setFrameGraphTick] = useState(0);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusedFlow, setFocusedFlow] = useState<FocusedFlowState | null>(null);
@@ -1219,7 +1218,6 @@ export default function App() {
           });
         }}
         onAutoLayout={() => setAutoLayoutTick((v) => v + 1)}
-        onFitGraph={() => setFrameGraphTick((v) => v + 1)}
         traceMode={traceMode}
         onToggleTraceMode={toggleTraceMode}
         onExportJson={exportGraphAsJson}
@@ -1308,7 +1306,6 @@ export default function App() {
           onTraceNext={stepTraceNext}
           onTraceFinish={finishTraceMode}
           autoLayoutTick={autoLayoutTick}
-          frameGraphTick={frameGraphTick}
         />
 
         {inspectorOpen ? (

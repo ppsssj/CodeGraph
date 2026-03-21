@@ -33,9 +33,9 @@ It is split into two parts:
 
 ![Node Click Walkthrough](assets/NodeClick_demo.gif)
 
-## Debug Walkthrough
+## Trace Walkthrough
 
-![Debug Walkthrough](assets/debug_demo.gif)
+![Trace Walkthrough](assets/Trace_demo.gif)
 
 ## Error Demo
 
@@ -46,14 +46,29 @@ It is split into two parts:
 ## Key Features
 
 - Analyze the active TypeScript/JavaScript file and render an interactive graph
-- Open source locations directly from graph nodes and inspector actions
+- Canvas node interactions split selection and navigation for more stable graph rendering
 - Trace mode to step through graph construction events
 - Inspector panel with diagnostics, graph metadata, and node details
 - Workspace file picker and graph search from the top bar
-- `Fit to Screen` action in the top bar to reframe the graph viewport
+- Canvas controls for zoom, focus-selection, and fit-graph actions
 - Export menu in the top bar with:
   - `JSON export`: saves graph data, active file info, analysis metadata, and current UI state
   - `JPG snapshot`: saves a JPEG image of the current graph canvas
+
+---
+
+## Interaction Model
+
+- `Single click` on a canvas node selects it and zooms the canvas toward that node
+- `Double click` on a canvas node opens the corresponding source location
+- Inspector actions continue to open code locations directly
+- External nodes can still be expanded into the current graph
+
+## Trace Mode
+
+- Trace playback steps through graph construction events one step at a time
+- Newly introduced trace nodes are visually focused in the canvas
+- Parameter-flow trace steps highlight the edge and surface the active flow in the inspector panel
 
 ---
 
