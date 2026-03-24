@@ -59,6 +59,12 @@
   max-width: 260px;
   color: rgba(226, 232, 240, 0.92);
   overflow: visible;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    filter 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
 }
 
 .cgNodePulse {
@@ -184,6 +190,17 @@
     0 14px 38px rgba(14, 165, 233, 0.10);
 }
 
+.cgNode--collapsing {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.97);
+  filter: saturate(0.8);
+  pointer-events: none;
+}
+
+.cgNode--expanding {
+  animation: cgNodeExpandIn 220ms ease;
+}
+
 .cgHandle {
   width: 9px;
   height: 9px;
@@ -208,6 +225,12 @@
 
 .cgHandle--child.react-flow__handle-right {
   right: -14px;
+}
+
+.cgHandle--group {
+  width: 10px;
+  height: 10px;
+  z-index: 2;
 }
 
 .cgNodeTop {
@@ -683,6 +706,25 @@
   padding: 18px 18px 22px;
   box-sizing: border-box;
   pointer-events: none;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.cgGroup--collapsed {
+  border-style: dashed;
+  border-color: rgba(56, 189, 248, 0.34);
+  background: rgba(8, 18, 38, 0.08);
+}
+
+.cgGroup--collapsing {
+  border-color: rgba(56, 189, 248, 0.3);
+  background: rgba(8, 18, 38, 0.04);
+}
+
+.cgGroup--expanding {
+  animation: cgGroupExpandIn 220ms ease;
 }
 
 .cgGroup--selected {
@@ -694,6 +736,7 @@
   left: 50%;
   top: 0;
   transform: translate(-50%, -46%);
+  appearance: none;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -708,6 +751,28 @@
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
   pointer-events: auto;
   z-index: 3;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+.cgGroupHeader:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(8, 18, 38, 0.92);
+}
+
+.cgGroup--collapsing .cgGroupHeader {
+  transform: translate(-50%, -46%) scale(0.985);
+  opacity: 0.92;
+}
+
+.cgGroup--expanding .cgGroupHeader {
+  transform: translate(-50%, -46%) scale(1.01);
 }
 
 .cgGroupTitle {
@@ -751,4 +816,26 @@
 /* 화살표도 같이 */
 .react-flow__edge-marker path {
   fill: rgba(226, 232, 240, 0.75);
+}
+
+@keyframes cgNodeExpandIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cgGroupExpandIn {
+  from {
+    opacity: 0.78;
+    transform: scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
