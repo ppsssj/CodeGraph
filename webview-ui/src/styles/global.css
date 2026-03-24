@@ -26,6 +26,38 @@
 
   --canvasBg: var(--vscode-editor-background, #0b0f18);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+
+  /* VS Code-aligned semantic palette */
+  --accent: var(--vscode-focusBorder, var(--vscode-textLink-foreground, var(--primary)));
+  --accentStrong: color-mix(in srgb, var(--accent) 84%, white 16%);
+  --accentSoft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accentMuted: color-mix(in srgb, var(--accent) 36%, transparent);
+
+  --info: var(--vscode-debugIcon-startForeground, var(--accent));
+  --success: var(--vscode-testing-iconPassed, #73c991);
+  --warning: var(--vscode-editorWarning-foreground, #cca700);
+  --error: var(--vscode-errorForeground, #f48771);
+
+  --surface1: color-mix(in srgb, var(--panel) 84%, var(--bg));
+  --surface2: color-mix(in srgb, var(--panel2) 88%, var(--bg));
+  --surface3: color-mix(in srgb, var(--bg) 88%, black 12%);
+  --surfaceCanvas: color-mix(in srgb, var(--bg) 82%, black 18%);
+  --surfaceCanvasSoft: color-mix(in srgb, var(--bg) 68%, transparent);
+  --surfaceHover: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  --surfaceActive: color-mix(in srgb, var(--accent) 16%, var(--panel2));
+
+  --outlineSubtle: color-mix(in srgb, var(--fg) 16%, transparent);
+  --outlineStrong: color-mix(in srgb, var(--accent) 44%, transparent);
+  --textSoft: color-mix(in srgb, var(--fg) 74%, transparent);
+  --textFaint: color-mix(in srgb, var(--fg) 56%, transparent);
+  --shadowElevated: 0 14px 32px color-mix(in srgb, black 34%, transparent);
+
+  --symbolFunction: var(--vscode-symbolIcon-functionForeground, var(--accent));
+  --symbolClass: var(--vscode-symbolIcon-classForeground, var(--accent));
+  --symbolInterface: var(--vscode-symbolIcon-interfaceForeground, var(--accent));
+  --symbolType: var(--vscode-symbolIcon-typeParameterForeground, var(--accent));
+  --symbolEnum: var(--vscode-symbolIcon-enumForeground, var(--accent));
+  --symbolExternal: var(--vscode-symbolIcon-variableForeground, var(--error));
 }
 
 * {

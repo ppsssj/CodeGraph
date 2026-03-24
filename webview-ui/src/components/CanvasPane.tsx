@@ -2,6 +2,7 @@
 import "reactflow/dist/style.css";
 import "./CanvasPane.css";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -1452,7 +1453,7 @@ function toReactFlowNodes(
   return rfNodes;
 }
 
-export function CanvasPane({
+export const CanvasPane = memo(function CanvasPane({
   hasData,
   graph,
   loadingState,
@@ -2433,22 +2434,6 @@ export function CanvasPane({
                 </div>
               ) : null}
 
-              <div
-                style={{
-                  position: "absolute",
-                  right: 12,
-                  bottom: 12,
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  background: "rgba(10,14,28,0.68)",
-                  fontSize: 11,
-                  lineHeight: 1.3,
-                  pointerEvents: "none",
-                }}
-              >
-                <span style={{ color: "#60a5fa" }}>dashed blue</span> = parameter flow
-              </div>
             </ReactFlow>
           </ReactFlowProvider>
           {!visibleHasData ? renderEmptyState("no-visible") : null}
@@ -2456,7 +2441,7 @@ export function CanvasPane({
       )}
     </section>
   );
-}
+});
 
 type Props = {
   hasData: boolean;

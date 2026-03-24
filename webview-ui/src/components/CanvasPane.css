@@ -37,27 +37,27 @@
 
 /* ReactFlow node visuals (custom node content) */
 .cgNode {
-  --cg-node-accent: rgba(148, 163, 184, 0.55);
-  --cg-node-accent-strong: rgba(226, 232, 240, 0.95);
-  --cg-node-tint: rgba(15, 23, 42, 0.72);
-  --cg-node-glow: rgba(15, 23, 42, 0.24);
-  --cg-node-badge-bg: rgba(15, 23, 42, 0.65);
-  --cg-node-badge-text: rgba(226, 232, 240, 0.88);
-  --cg-node-subtext: rgba(226, 232, 240, 0.68);
+  --cg-node-accent: color-mix(in srgb, var(--fg) 34%, transparent);
+  --cg-node-accent-strong: var(--fg);
+  --cg-node-tint: var(--surface2);
+  --cg-node-glow: color-mix(in srgb, black 22%, transparent);
+  --cg-node-badge-bg: color-mix(in srgb, var(--surface3) 82%, transparent);
+  --cg-node-badge-text: var(--textSoft);
+  --cg-node-subtext: var(--textFaint);
   position: relative;
   border-radius: 12px;
   border: 1px solid var(--cg-node-accent);
   border-left-width: 3px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
-    linear-gradient(135deg, var(--cg-node-tint), rgba(2, 6, 23, 0.82));
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 4%, transparent), transparent),
+    linear-gradient(135deg, var(--cg-node-tint), var(--surface3));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 5%, transparent),
     0 12px 36px var(--cg-node-glow);
   padding: 10px 12px;
   min-width: 190px;
   max-width: 260px;
-  color: rgba(226, 232, 240, 0.92);
+  color: var(--textSoft);
   overflow: visible;
   transition:
     opacity 180ms ease,
@@ -71,10 +71,10 @@
   position: absolute;
   inset: -9px;
   border-radius: 18px;
-  border: 1px solid rgba(125, 211, 252, 0.42);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
   box-shadow:
-    0 0 0 0 rgba(56, 189, 248, 0.32),
-    0 0 20px rgba(56, 189, 248, 0.22);
+    0 0 0 0 color-mix(in srgb, var(--accent) 32%, transparent),
+    0 0 20px color-mix(in srgb, var(--accent) 22%, transparent);
   pointer-events: none;
   animation: cgNodeFocusPulse 900ms ease-out forwards;
 }
@@ -92,102 +92,85 @@
 }
 
 .cgNode--default {
-  --cg-node-accent: rgba(148, 163, 184, 0.38);
-  --cg-node-accent-strong: rgba(226, 232, 240, 0.95);
-  --cg-node-tint: rgba(30, 41, 59, 0.72);
-  --cg-node-glow: rgba(15, 23, 42, 0.24);
-  --cg-node-badge-bg: rgba(30, 41, 59, 0.75);
-  --cg-node-badge-text: rgba(226, 232, 240, 0.88);
+  --cg-node-accent: color-mix(in srgb, var(--fg) 28%, transparent);
 }
 
 .cgNode--function {
-  --cg-node-accent: rgba(96, 165, 250, 0.62);
-  --cg-node-accent-strong: rgba(219, 234, 254, 0.96);
-  --cg-node-tint: rgba(30, 41, 59, 0.78);
-  --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(59, 130, 246, 0.2);
-  --cg-node-badge-text: rgba(219, 234, 254, 0.9);
-  --cg-node-subtext: rgba(191, 219, 254, 0.74);
+  --cg-node-accent: var(--symbolFunction);
+  --cg-node-accent-strong: color-mix(in srgb, var(--symbolFunction) 62%, var(--fg));
+  --cg-node-badge-bg: color-mix(in srgb, var(--symbolFunction) 16%, transparent);
+  --cg-node-badge-text: color-mix(in srgb, var(--symbolFunction) 68%, var(--fg));
+  --cg-node-subtext: color-mix(in srgb, var(--symbolFunction) 56%, var(--fg));
 }
 
 .cgNode--class {
-  --cg-node-accent: rgba(249, 115, 22, 0.58);
-  --cg-node-accent-strong: rgba(255, 237, 213, 0.95);
-  --cg-node-tint: rgba(30, 41, 59, 0.78);
-  --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(234, 88, 12, 0.2);
-  --cg-node-badge-text: rgba(255, 237, 213, 0.9);
-  --cg-node-subtext: rgba(254, 215, 170, 0.74);
+  --cg-node-accent: var(--symbolClass);
+  --cg-node-accent-strong: color-mix(in srgb, var(--symbolClass) 62%, var(--fg));
+  --cg-node-badge-bg: color-mix(in srgb, var(--symbolClass) 16%, transparent);
+  --cg-node-badge-text: color-mix(in srgb, var(--symbolClass) 68%, var(--fg));
+  --cg-node-subtext: color-mix(in srgb, var(--symbolClass) 56%, var(--fg));
 }
 
 .cgNode--interface {
-  --cg-node-accent: rgba(52, 211, 153, 0.6);
-  --cg-node-accent-strong: rgba(220, 252, 231, 0.95);
-  --cg-node-tint: rgba(30, 41, 59, 0.78);
-  --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(16, 185, 129, 0.2);
-  --cg-node-badge-text: rgba(220, 252, 231, 0.9);
-  --cg-node-subtext: rgba(187, 247, 208, 0.74);
+  --cg-node-accent: var(--symbolInterface);
+  --cg-node-accent-strong: color-mix(in srgb, var(--symbolInterface) 62%, var(--fg));
+  --cg-node-badge-bg: color-mix(in srgb, var(--symbolInterface) 16%, transparent);
+  --cg-node-badge-text: color-mix(in srgb, var(--symbolInterface) 68%, var(--fg));
+  --cg-node-subtext: color-mix(in srgb, var(--symbolInterface) 56%, var(--fg));
 }
 
 .cgNode--type {
-  --cg-node-accent: rgba(168, 85, 247, 0.58);
-  --cg-node-accent-strong: rgba(243, 232, 255, 0.95);
-  --cg-node-tint: rgba(30, 41, 59, 0.78);
-  --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(168, 85, 247, 0.2);
-  --cg-node-badge-text: rgba(243, 232, 255, 0.9);
-  --cg-node-subtext: rgba(233, 213, 255, 0.74);
+  --cg-node-accent: var(--symbolType);
+  --cg-node-accent-strong: color-mix(in srgb, var(--symbolType) 62%, var(--fg));
+  --cg-node-badge-bg: color-mix(in srgb, var(--symbolType) 16%, transparent);
+  --cg-node-badge-text: color-mix(in srgb, var(--symbolType) 68%, var(--fg));
+  --cg-node-subtext: color-mix(in srgb, var(--symbolType) 56%, var(--fg));
 }
 
 .cgNode--enum {
-  --cg-node-accent: rgba(244, 114, 182, 0.54);
-  --cg-node-accent-strong: rgba(252, 231, 243, 0.95);
-  --cg-node-tint: rgba(30, 41, 59, 0.78);
-  --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(236, 72, 153, 0.2);
-  --cg-node-badge-text: rgba(252, 231, 243, 0.9);
-  --cg-node-subtext: rgba(251, 207, 232, 0.74);
+  --cg-node-accent: var(--symbolEnum);
+  --cg-node-accent-strong: color-mix(in srgb, var(--symbolEnum) 62%, var(--fg));
+  --cg-node-badge-bg: color-mix(in srgb, var(--symbolEnum) 16%, transparent);
+  --cg-node-badge-text: color-mix(in srgb, var(--symbolEnum) 68%, var(--fg));
+  --cg-node-subtext: color-mix(in srgb, var(--symbolEnum) 56%, var(--fg));
 }
 
 .cgNode--external {
-  --cg-node-accent: rgba(248, 113, 113, 0.54);
-  --cg-node-accent-strong: rgba(254, 226, 226, 0.95);
-  --cg-node-tint: rgba(30, 41, 59, 0.78);
-  --cg-node-glow: rgba(15, 23, 42, 0.18);
-  --cg-node-badge-bg: rgba(239, 68, 68, 0.2);
-  --cg-node-badge-text: rgba(254, 226, 226, 0.9);
-  --cg-node-subtext: rgba(254, 202, 202, 0.74);
+  --cg-node-accent: var(--symbolExternal);
+  --cg-node-accent-strong: color-mix(in srgb, var(--symbolExternal) 56%, var(--fg));
+  --cg-node-badge-bg: color-mix(in srgb, var(--symbolExternal) 16%, transparent);
+  --cg-node-badge-text: color-mix(in srgb, var(--symbolExternal) 64%, var(--fg));
+  --cg-node-subtext: color-mix(in srgb, var(--symbolExternal) 52%, var(--fg));
 }
 
 .cgNode--selected {
-  border-color: rgba(125, 211, 252, 0.72);
-  border-left-color: rgba(103, 232, 249, 0.98);
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  border-left-color: var(--accentStrong);
   background:
-    linear-gradient(180deg, rgba(56, 189, 248, 0.08), rgba(255, 255, 255, 0)),
-    linear-gradient(135deg, var(--cg-node-tint), rgba(2, 6, 23, 0.82));
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent),
+    linear-gradient(135deg, var(--cg-node-tint), var(--surface3));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 0 0 1px rgba(125, 211, 252, 0.28),
-    0 0 0 4px rgba(56, 189, 248, 0.06),
-    0 14px 28px rgba(56, 189, 248, 0.12);
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 7%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent) 6%, transparent),
+    0 14px 28px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .cgNode--searchHit:not(.cgNode--selected) {
-  border-color: rgba(125, 211, 252, 0.42);
-  border-left-color: rgba(125, 211, 252, 0.78);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  border-left-color: color-mix(in srgb, var(--accent) 78%, transparent);
   box-shadow:
-    0 0 0 1px rgba(125, 211, 252, 0.12),
-    0 12px 32px rgba(14, 165, 233, 0.08);
+    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 12px 32px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .cgNode--connected:not(.cgNode--selected) {
-  border-color: rgba(125, 211, 252, 0.46);
-  border-left-color: rgba(125, 211, 252, 0.82);
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  border-left-color: color-mix(in srgb, var(--accent) 82%, transparent);
   box-shadow:
-    0 0 0 1px rgba(125, 211, 252, 0.18),
-    0 0 0 8px rgba(56, 189, 248, 0.06),
-    0 14px 38px rgba(14, 165, 233, 0.10);
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 0 0 8px color-mix(in srgb, var(--accent) 6%, transparent),
+    0 14px 38px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .cgNode--collapsing {
@@ -205,8 +188,8 @@
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  border: 1px solid rgba(226, 232, 240, 0.6);
-  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid color-mix(in srgb, var(--fg) 58%, transparent);
+  background: color-mix(in srgb, var(--surface2) 90%, black 10%);
 }
 
 .cgHandle--child {
@@ -214,7 +197,7 @@
   height: 8px;
   top: 50%;
   transform: translateY(-50%);
-  background: color-mix(in srgb, var(--cg-node-accent) 80%, rgba(30, 41, 59, 0.95));
+  background: color-mix(in srgb, var(--cg-node-accent) 80%, var(--surface2));
   border-color: color-mix(in srgb, var(--cg-node-accent) 90%, white 10%);
   z-index: 4;
 }
@@ -280,15 +263,15 @@
 }
 
 .cgDiagBadge--error {
-  color: rgba(254, 226, 226, 0.96);
-  background: rgba(239, 68, 68, 0.18);
-  border-color: rgba(248, 113, 113, 0.42);
+  color: color-mix(in srgb, var(--error) 48%, var(--fg));
+  background: color-mix(in srgb, var(--error) 18%, transparent);
+  border-color: color-mix(in srgb, var(--error) 42%, transparent);
 }
 
 .cgDiagBadge--warning {
-  color: rgba(254, 240, 138, 0.96);
-  background: rgba(245, 158, 11, 0.18);
-  border-color: rgba(251, 191, 36, 0.42);
+  color: color-mix(in srgb, var(--warning) 54%, var(--fg));
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 42%, transparent);
 }
 
 .cgNodeSub {
@@ -305,7 +288,7 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--outlineSubtle);
   overflow: visible;
 }
 
@@ -332,7 +315,7 @@
   justify-content: center;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--cg-node-accent) 70%, transparent);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--surface1) 80%, transparent);
   color: var(--cg-node-accent-strong);
   font-size: 10px;
   font-weight: 800;
@@ -343,8 +326,8 @@
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--cg-node-accent) 70%, transparent);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
-    rgba(255, 255, 255, 0.03);
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 3%, transparent), transparent),
+    color-mix(in srgb, var(--surface1) 72%, transparent);
   padding: 8px 10px;
   overflow: visible;
 }
@@ -355,8 +338,8 @@
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--cg-node-accent) 90%, white 10%);
   box-shadow:
-    0 0 0 0 rgba(56, 189, 248, 0.22),
-    0 0 12px rgba(56, 189, 248, 0.18);
+    0 0 0 0 color-mix(in srgb, var(--accent) 22%, transparent),
+    0 0 12px color-mix(in srgb, var(--accent) 18%, transparent);
   pointer-events: none;
   animation: cgChildFocusPulse 820ms ease-out forwards;
 }
@@ -364,8 +347,8 @@
 .cgChildNode--selected {
   border-color: color-mix(in srgb, var(--cg-node-accent) 100%, white 12%);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--cg-node-accent) 14%, transparent), rgba(255, 255, 255, 0)),
-    rgba(255, 255, 255, 0.06);
+    linear-gradient(180deg, color-mix(in srgb, var(--cg-node-accent) 14%, transparent), transparent),
+    color-mix(in srgb, var(--surface1) 80%, transparent);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--cg-node-accent) 34%, transparent),
     0 8px 16px color-mix(in srgb, var(--cg-node-accent) 10%, transparent);
@@ -383,8 +366,8 @@
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--cg-node-accent) 100%, white 10%);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0)),
-    rgba(255, 255, 255, 0.05);
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 5%, transparent), transparent),
+    color-mix(in srgb, var(--surface1) 82%, transparent);
 }
 
 .cgChildTop {
@@ -432,15 +415,15 @@
 }
 
 .cgChildDiagBadge--error {
-  color: rgba(254, 226, 226, 0.96);
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(248, 113, 113, 0.38);
+  color: color-mix(in srgb, var(--error) 48%, var(--fg));
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  border-color: color-mix(in srgb, var(--error) 38%, transparent);
 }
 
 .cgChildDiagBadge--warning {
-  color: rgba(254, 240, 138, 0.96);
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(251, 191, 36, 0.38);
+  color: color-mix(in srgb, var(--warning) 54%, var(--fg));
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 38%, transparent);
 }
 
 .cgChildSub {
@@ -492,9 +475,9 @@
   font-weight: 800;
   padding: 4px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(226, 232, 240, 0.14);
-  background: rgba(2, 6, 23, 0.72);
-  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvas) 88%, transparent);
+  color: var(--textSoft);
 }
 
 /* Controls */
@@ -512,9 +495,9 @@
   width: 34px;
   height: 34px;
   border-radius: 12px;
-  border: 1px solid rgba(226, 232, 240, 0.14);
-  background: rgba(2, 6, 23, 0.55);
-  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvas) 72%, transparent);
+  color: var(--textSoft);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -523,8 +506,8 @@
 
 .iconBtn:hover {
   transform: translateY(-1px);
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(2, 6, 23, 0.68);
+  border-color: var(--outlineStrong);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surfaceCanvas));
 }
 
 .iconBtn:disabled {
@@ -534,8 +517,8 @@
 
 .iconBtn:disabled:hover {
   transform: none;
-  border-color: rgba(226, 232, 240, 0.14);
-  background: rgba(2, 6, 23, 0.55);
+  border-color: var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvas) 72%, transparent);
 }
 
 /* Empty state */
@@ -546,9 +529,9 @@
   gap: 10px;
   padding: 24px;
   border-radius: 16px;
-  border: 1px solid rgba(226, 232, 240, 0.12);
-  background: rgba(2, 6, 23, 0.45);
-  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvasSoft) 78%, transparent);
+  color: var(--textSoft);
 }
 
 .emptyState--overlay {
@@ -557,7 +540,7 @@
   transform: translate(-50%, -50%);
   z-index: 8;
   max-width: min(560px, calc(100% - 48px));
-  box-shadow: 0 18px 42px rgba(2, 6, 23, 0.28);
+  box-shadow: 0 18px 42px color-mix(in srgb, black 28%, transparent);
 }
 
 .emptyIcon {
@@ -566,8 +549,8 @@
   border-radius: 16px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(226, 232, 240, 0.14);
-  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surface2) 72%, transparent);
 }
 
 .emptyTitle {
@@ -577,7 +560,7 @@
 
 .emptySub {
   font-size: 12px;
-  color: rgba(226, 232, 240, 0.65);
+  color: var(--textFaint);
   text-align: center;
 }
 
@@ -590,15 +573,15 @@
 .btnPrimary {
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.14);
-  color: rgba(226, 232, 240, 0.95);
+  border: 1px solid var(--outlineStrong);
+  background: var(--accentSoft);
+  color: color-mix(in srgb, var(--fg) 95%, transparent);
   font-weight: 900;
   cursor: pointer;
 }
 
 .btnPrimary:hover {
-  background: rgba(56, 189, 248, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* Root / selection banners */
@@ -612,9 +595,9 @@
   gap: 10px;
   padding: 10px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(226, 232, 240, 0.14);
-  background: rgba(2, 6, 23, 0.60);
-  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvas) 80%, transparent);
+  color: var(--textSoft);
 }
 
 .canvasNotice {
@@ -627,34 +610,34 @@
   max-width: min(680px, calc(100% - 120px));
   padding: 10px 12px;
   border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(8, 18, 38, 0.92);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvas) 92%, transparent);
+  box-shadow: 0 12px 28px color-mix(in srgb, black 22%, transparent);
 }
 
 .canvasNotice--info {
-  border-color: rgba(56, 189, 248, 0.35);
+  border-color: var(--outlineStrong);
 }
 
 .canvasNotice--warning {
-  border-color: rgba(245, 158, 11, 0.48);
+  border-color: color-mix(in srgb, var(--warning) 52%, transparent);
 }
 
 .canvasNotice--error {
-  border-color: rgba(248, 113, 113, 0.52);
+  border-color: color-mix(in srgb, var(--error) 54%, transparent);
 }
 
 .canvasNoticeTitle {
   font-size: 12px;
   font-weight: 900;
-  color: rgba(226, 232, 240, 0.96);
+  color: color-mix(in srgb, var(--fg) 96%, transparent);
 }
 
 .canvasNoticeDetail {
   margin-top: 4px;
   font-size: 11px;
   line-height: 1.45;
-  color: rgba(226, 232, 240, 0.72);
+  color: var(--textSoft);
 }
 
 .canvasNotice--inline {
@@ -671,10 +654,10 @@
   gap: 12px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(56, 189, 248, 0.34);
-  background: rgba(8, 18, 38, 0.92);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
-  color: rgba(226, 232, 240, 0.92);
+  border: 1px solid var(--outlineStrong);
+  background: color-mix(in srgb, var(--surfaceCanvas) 92%, transparent);
+  box-shadow: 0 12px 28px color-mix(in srgb, black 18%, transparent);
+  color: color-mix(in srgb, var(--fg) 92%, transparent);
   z-index: 7;
 }
 
@@ -700,9 +683,9 @@
   border-radius: 12px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(56, 189, 248, 0.28);
-  background: rgba(56, 189, 248, 0.12);
-  color: rgba(186, 230, 253, 0.96);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--accentSoft);
+  color: color-mix(in srgb, var(--accent) 68%, var(--fg));
   flex: 0 0 auto;
 }
 
@@ -713,14 +696,14 @@
 .canvasLoadingTitle {
   font-size: 12px;
   font-weight: 900;
-  color: rgba(226, 232, 240, 0.97);
+  color: color-mix(in srgb, var(--fg) 97%, transparent);
 }
 
 .canvasLoadingDetail {
   margin-top: 4px;
   font-size: 11px;
   line-height: 1.4;
-  color: rgba(226, 232, 240, 0.72);
+  color: var(--textSoft);
 }
 
 .rootText {
@@ -740,16 +723,16 @@
 .btnGhost {
   padding: 9px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(226, 232, 240, 0.14);
-  background: rgba(2, 6, 23, 0.45);
-  color: rgba(226, 232, 240, 0.85);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surfaceCanvasSoft) 76%, transparent);
+  color: var(--textSoft);
   font-weight: 900;
   cursor: pointer;
 }
 
 .btnGhost:hover {
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(2, 6, 23, 0.58);
+  border-color: var(--outlineStrong);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surfaceCanvas));
 }
 
 /* File group (container) node */
@@ -758,8 +741,10 @@
   width: 100%;
   height: 100%;
   border-radius: 12px;
-  background: transparent;
-  border: 1px solid rgba(56, 189, 248, 0.22);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 11%, transparent), transparent 30%),
+    color-mix(in srgb, var(--surfaceCanvas) 44%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   box-shadow: none;
   padding: 18px 18px 22px;
   box-sizing: border-box;
@@ -772,13 +757,17 @@
 
 .cgGroup--collapsed {
   border-style: dashed;
-  border-color: rgba(56, 189, 248, 0.34);
-  background: rgba(8, 18, 38, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 20%, transparent), transparent 34%),
+    color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .cgGroup--collapsing {
-  border-color: rgba(56, 189, 248, 0.3);
-  background: rgba(8, 18, 38, 0.04);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 13%, transparent), transparent 34%),
+    color-mix(in srgb, var(--surfaceCanvas) 34%, transparent);
 }
 
 .cgGroup--expanding {
@@ -786,7 +775,7 @@
 }
 
 .cgGroup--selected {
-  border-color: rgba(56, 189, 248, 0.45);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .cgGroupHeader {
@@ -803,10 +792,10 @@
   min-width: 180px;
   max-width: min(65%, 420px);
   width: max-content;
-  background: rgba(8, 18, 38, 0.88);
-  border: 1px solid rgba(56, 189, 248, 0.38);
+  background: color-mix(in srgb, var(--surfaceCanvas) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
   border-radius: 12px;
-  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
+  box-shadow: 0 10px 24px color-mix(in srgb, black 24%, transparent);
   pointer-events: auto;
   z-index: 3;
   cursor: pointer;
@@ -820,8 +809,8 @@
 }
 
 .cgGroupHeader:hover {
-  border-color: rgba(56, 189, 248, 0.5);
-  background: rgba(8, 18, 38, 0.92);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--surfaceCanvas) 92%, transparent);
 }
 
 .cgGroup--collapsing .cgGroupHeader {
@@ -836,7 +825,7 @@
 .cgGroupTitle {
   font-size: 12px;
   font-weight: 900;
-  color: rgba(186, 230, 253, 0.96);
+  color: color-mix(in srgb, var(--accent) 68%, var(--fg));
 }
 
 .cgGroupMeta {
@@ -844,7 +833,7 @@
   justify-content: center;
   gap: 10px;
   font-size: 10px;
-  color: rgba(186, 230, 253, 0.72);
+  color: color-mix(in srgb, var(--accent) 44%, var(--fg));
   max-width: 100%;
 }
 
@@ -856,24 +845,30 @@
 
 .cgGroupCount {
   font-weight: 800;
-  color: rgba(186, 230, 253, 0.9);
+  color: color-mix(in srgb, var(--accent) 60%, var(--fg));
 }
 
 /* edge 선 굵기/명도 강화 */
+.react-flow__edge,
+.react-flow__edge *,
+.react-flow__edge-interaction {
+  pointer-events: none;
+}
+
 .react-flow__edge-path {
   stroke-width: 2.2;
-  stroke: rgba(226, 232, 240, 0.65);
+  stroke: color-mix(in srgb, var(--fg) 65%, transparent);
 }
 
 /* 선택된 edge는 더 강조 */
 .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 3;
-  stroke: rgba(56, 189, 248, 0.9);
+  stroke: color-mix(in srgb, var(--accent) 90%, transparent);
 }
 
 /* 화살표도 같이 */
 .react-flow__edge-marker path {
-  fill: rgba(226, 232, 240, 0.75);
+  fill: color-mix(in srgb, var(--fg) 75%, transparent);
 }
 
 @keyframes cgNodeExpandIn {

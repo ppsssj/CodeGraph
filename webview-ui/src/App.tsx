@@ -70,6 +70,10 @@ type PatchApplyResultPayload = Extract<
   ExtToWebviewMessage,
   { type: "patchApplyResult" }
 >["payload"];
+type HostStatePayload = Extract<
+  ExtToWebviewMessage,
+  { type: "hostState" }
+>["payload"];
 type NoticeSeverity = UINotice["severity"];
 type OpenLocationPayload = Extract<
   WebviewToExtMessage,
@@ -506,7 +510,7 @@ function placeScaffoldPanelAtPointer(args: {
 
 type ToastKind = "info" | "success" | "warning" | "error";
 type ToastState = { open: boolean; kind: ToastKind; message: string };
-type InspectorPlacement = "auto" | "right" | "bottom";
+type InspectorPlacement = "auto" | "left" | "right" | "bottom";
 type EffectiveInspectorPlacement = Exclude<InspectorPlacement, "auto">;
 type ExportFormat = "json" | "jpg";
 type FocusedFlowState = {
@@ -547,6 +551,10 @@ type AnalysisLoadingState = {
 };
 
 export default function App() {
+  const [hostState, setHostState] = useState<HostStatePayload>({
+    currentHost: "panel",
+    sidebarLocation: "left",
+  });
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
   const [workspaceFiles, setWorkspaceFiles] =
     useState<WorkspaceFilesPayload | null>(null);
@@ -652,7 +660,7 @@ export default function App() {
     useState<InspectorPlacement>(() => {
       try {
         const v = localStorage.getItem(LS_INSPECTOR_PLACEMENT);
-        return v === "right" || v === "bottom" ? v : "auto";
+        return v === "left" || v === "right" || v === "bottom" ? v : "auto";
       } catch {
         return "auto";
       }
@@ -684,7 +692,7 @@ export default function App() {
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat | null>(null);
 
-  const postMessage = (
+  const postMessage = useCallback((
     origin: string,
     message: WebviewToExtMessage,
     detail?: Record<string, unknown>,
@@ -694,9 +702,9 @@ export default function App() {
       ...detail,
     });
     vscode.postMessage(message);
-  };
+  }, []);
 
-  const postOpenLocation = (
+  const postOpenLocation = useCallback((
     origin: string,
     payload: OpenLocationPayload,
     detail?: Record<string, unknown>,
@@ -721,7 +729,7 @@ export default function App() {
       },
       detail,
     );
-  };
+  }, [postMessage]);
 
   const finishExport = () => {
     setExportStatus("done");
@@ -729,14 +737,14 @@ export default function App() {
     setExportFormat(null);
   };
 
-  const showToast = (kind: ToastKind, message: string, ms = 1800) => {
+  const showToast = useCallback((kind: ToastKind, message: string, ms = 1800) => {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     setToast({ open: true, kind, message });
     toastTimerRef.current = window.setTimeout(() => {
       setToast((t) => ({ ...t, open: false }));
       toastTimerRef.current = null;
     }, ms);
-  };
+  }, []);
 
   const noticeSeverityToToastKind = (severity: NoticeSeverity): ToastKind => {
     if (severity === "warning") return "warning";
@@ -856,7 +864,7 @@ export default function App() {
     });
   }, [flushScaffoldPanelLayout]);
 
-  const openScaffoldPanelAt = (args: OpenScaffoldPanelArgs) => {
+  const openScaffoldPanelAt = useCallback((args: OpenScaffoldPanelArgs) => {
     const appRect = getScaffoldAppRect();
     setScaffoldPanelInactive(false);
     if (!appRect) {
@@ -880,7 +888,7 @@ export default function App() {
       }),
     );
     setScaffoldModalOpen(true);
-  };
+  }, []);
 
   // Keep latest values for selection-root logic
   const pendingRootRef = useRef(false);
@@ -938,6 +946,12 @@ export default function App() {
       if (!isExtToWebviewMessage(event.data)) return;
 
       const msg = event.data;
+
+      if (msg.type === "hostState") {
+        const payload: HostStatePayload = msg.payload;
+        setHostState(payload);
+        return;
+      }
 
       if (msg.type === "activeFile") {
         setActiveFile(msg.payload);
@@ -1136,6 +1150,7 @@ export default function App() {
     postMessage("app.mount", { type: "requestActiveFile" });
     postMessage("app.mount", { type: "requestWorkspaceFiles" });
     postMessage("app.mount", { type: "requestSelection" });
+    postMessage("app.mount", { type: "requestHostState" });
 
     return () => window.removeEventListener("message", onMessage);
   }, []);
@@ -1305,7 +1320,10 @@ export default function App() {
         return;
       }
 
-      const dx = startX - ev.clientX;
+      const dx =
+        effectiveInspectorPlacement === "left"
+          ? ev.clientX - startX
+          : startX - ev.clientX;
       setInspectorWidth(clampInspectorWidth(startWidth + dx));
     };
 
@@ -1453,6 +1471,13 @@ export default function App() {
         }
       : null
   );
+  const highlightedNodeIds = useMemo(
+    () =>
+      effectiveFocusedFlow
+        ? [effectiveFocusedFlow.sourceId, effectiveFocusedFlow.targetId]
+        : [],
+    [effectiveFocusedFlow],
+  );
   const traceActiveNodeId =
     traceFocusEvent?.type === "node" ? traceFocusEvent.node.id : null;
   const runtimeActiveNode = useMemo(() => {
@@ -1490,17 +1515,17 @@ export default function App() {
     return findNodeById(graph, selectedNodeId);
   }, [graph, selectedNodeId]);
 
-  const replaceSelectedNodes = (nodeId: string | null) => {
+  const replaceSelectedNodes = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
     setSelectedNodeIds(nodeId ? [nodeId] : []);
-  };
+  }, []);
 
-  const clearSelectedNodes = () => {
+  const clearSelectedNodes = useCallback(() => {
     setSelectedNodeId(null);
     setSelectedNodeIds([]);
-  };
+  }, []);
 
-  const toggleSelectedNode = (nodeId: string) => {
+  const toggleSelectedNode = useCallback((nodeId: string) => {
     setSelectedNodeIds((current) => {
       if (current.includes(nodeId)) {
         const next = current.filter((id) => id !== nodeId);
@@ -1513,7 +1538,7 @@ export default function App() {
       setSelectedNodeId(nodeId);
       return [...current, nodeId];
     });
-  };
+  }, []);
 
   const activeFilePath = activeFile ? uriToFsPath(activeFile.uri) : null;
   const workspaceRoot = workspaceFiles?.rootPath ?? null;
@@ -1521,13 +1546,13 @@ export default function App() {
   const exportBaseName =
     activeFile?.fileName?.replace(/[^\w.-]+/g, "_")?.slice(0, 64) || "codegraph";
 
-  const beginAnalysisLoading = (message: string, detail?: string) => {
+  const beginAnalysisLoading = useCallback((message: string, detail?: string) => {
     setAnalysisLoading({ active: true, message, detail });
-  };
+  }, []);
 
-  const finishAnalysisLoading = () => {
+  const finishAnalysisLoading = useCallback(() => {
     setAnalysisLoading(null);
-  };
+  }, []);
 
   useEffect(() => {
     try {
@@ -1542,7 +1567,7 @@ export default function App() {
     });
   }, [graphDepth]);
 
-  const resetGraph = () => {
+  const resetGraph = useCallback(() => {
     pushWebviewDebugEvent("app.resetGraph", {
       ...getGraphCounts(graphRef.current),
       activeGeneration: activeGraphGenerationRef.current,
@@ -1557,23 +1582,23 @@ export default function App() {
     setInspectorFocusRequest(null);
     setRootNodeId(null);
     setInspectorNotice(null);
-  };
+  }, [clearSelectedNodes]);
 
-  const stepTraceTo = (nextCursor: number) => {
+  const stepTraceTo = useCallback((nextCursor: number) => {
     if (!traceEvents || traceEvents.length === 0) return;
     const c = Math.max(0, Math.min(traceEvents.length, nextCursor));
     setTraceCursor(c);
     setGraphState(buildGraphFromTrace(traceEvents, c));
-  };
+  }, [traceEvents]);
 
-  const stepTracePrev = () => stepTraceTo(traceCursor - 1);
-  const stepTraceNext = () => stepTraceTo(traceCursor + 1);
-  const finishTraceMode = () => {
+  const stepTracePrev = useCallback(() => stepTraceTo(traceCursor - 1), [stepTraceTo, traceCursor]);
+  const stepTraceNext = useCallback(() => stepTraceTo(traceCursor + 1), [stepTraceTo, traceCursor]);
+  const finishTraceMode = useCallback(() => {
     setTraceMode(false);
     setTraceEvents(null);
     setTraceCursor(0);
-  };
-  const toggleTraceMode = () => {
+  }, []);
+  const toggleTraceMode = useCallback(() => {
     setTraceMode((prev) => {
       const next = !prev;
       if (next) {
@@ -1592,9 +1617,9 @@ export default function App() {
       }
       return next;
     });
-  };
+  }, [beginAnalysisLoading, postMessage, resetGraph]);
 
-  const expandExternalFile = (filePath: string) => {
+  const expandExternalFile = useCallback((filePath: string) => {
     if (!filePath) {
       pushWebviewDebugEvent("expandNode.skipped.empty-file", {});
       return;
@@ -1621,7 +1646,7 @@ export default function App() {
             : undefined,
       },
     });
-  };
+  }, [beginAnalysisLoading, postMessage]);
 
   useEffect(() => {
     if (!runtimeDebug || runtimeDebug.state !== "paused") return;
@@ -1654,6 +1679,75 @@ export default function App() {
       },
     );
   };
+
+  const handleCanvasSelectNode = useCallback(
+    (nodeId: string, options?: { toggle?: boolean }) => {
+      pushWebviewDebugEvent("canvas.selection.request", {
+        nodeId,
+        toggle: options?.toggle ?? false,
+      });
+      setFocusedFlow(null);
+      if (options?.toggle) {
+        toggleSelectedNode(nodeId);
+        return;
+      }
+      replaceSelectedNodes(nodeId);
+    },
+    [replaceSelectedNodes, toggleSelectedNode],
+  );
+
+  const handleCanvasClearSelection = useCallback(() => {
+    pushWebviewDebugEvent("canvas.selection.clear", {});
+    clearSelectedNodes();
+    setFocusedFlow(null);
+  }, [clearSelectedNodes]);
+
+  const handleCanvasOpenNode = useCallback((n: GraphNode) => {
+    if (isNodeModulesPath(n.file)) {
+      pushWebviewDebugEvent("canvas.onOpenNode.blocked.nodeModules", {
+        ...getNodeDebugInfo(n),
+      });
+      showToast("info", "node_modules declaration files stay collapsed in the graph");
+      return;
+    }
+    postOpenLocation(
+      "canvas.onOpenNode",
+      {
+        filePath: n.file,
+        range: n.range,
+        preserveFocus: false,
+      },
+      getNodeDebugInfo(n),
+    );
+    if (n.kind === "external") {
+      pushWebviewDebugEvent("canvas.external.expand-requested", {
+        ...getNodeDebugInfo(n),
+      });
+    }
+  }, [postOpenLocation, showToast]);
+
+  const handleGenerateFromActive = useCallback(() => {
+    beginAnalysisLoading(
+      traceMode ? "Loading trace graph..." : "Rendering graph...",
+      traceMode
+        ? "Tracing the active file and preparing a step-by-step graph view."
+        : `Analyzing the active file with ${describeDepth(graphDepth)}.`,
+    );
+    postMessage("canvas.emptyState.generate", {
+      type: "analyzeActiveFile",
+      payload: { traceMode, graphDepth },
+    });
+  }, [beginAnalysisLoading, graphDepth, postMessage, traceMode]);
+
+  const handleUseSelectionAsRoot = useCallback(() => {
+    setPendingUseSelectionAsRoot(true);
+    postMessage("canvas.useSelectionAsRoot", { type: "requestSelection" });
+  }, [postMessage]);
+
+  const handleClearRoot = useCallback(() => {
+    setRootNodeId(null);
+    setInspectorNotice(null);
+  }, []);
 
   const activateGraphNode = (nodeId: string) => {
     setFocusedFlow(null);
@@ -2009,73 +2103,15 @@ export default function App() {
           rootNodeId={rootNodeId}
           selectedNodeId={selectedNodeId}
           selectedNodeIds={selectedNodeIds}
-          onSelectNode={(nodeId, options) => {
-            pushWebviewDebugEvent("canvas.selection.request", {
-              nodeId,
-              toggle: options?.toggle ?? false,
-            });
-            setFocusedFlow(null);
-            if (options?.toggle) {
-              toggleSelectedNode(nodeId);
-              return;
-            }
-            replaceSelectedNodes(nodeId);
-          }}
-          onClearSelection={() => {
-            pushWebviewDebugEvent("canvas.selection.clear", {});
-            clearSelectedNodes();
-            setFocusedFlow(null);
-          }}
-          onOpenNode={(n) => {
-            if (isNodeModulesPath(n.file)) {
-              pushWebviewDebugEvent("canvas.onOpenNode.blocked.nodeModules", {
-                ...getNodeDebugInfo(n),
-              });
-              showToast("info", "node_modules declaration files stay collapsed in the graph");
-              return;
-            }
-            postOpenLocation(
-              "canvas.onOpenNode",
-              {
-                filePath: n.file,
-                range: n.range,
-                preserveFocus: false,
-              },
-              getNodeDebugInfo(n),
-            );
-            if (n.kind === "external") {
-              pushWebviewDebugEvent("canvas.external.expand-requested", {
-                ...getNodeDebugInfo(n),
-              });
-            }
-          }}
-          onGenerateFromActive={() => {
-            beginAnalysisLoading(
-              traceMode ? "Loading trace graph..." : "Rendering graph...",
-              traceMode
-                ? "Tracing the active file and preparing a step-by-step graph view."
-                : `Analyzing the active file with ${describeDepth(graphDepth)}.`,
-            );
-            postMessage("canvas.emptyState.generate", {
-              type: "analyzeActiveFile",
-              payload: { traceMode, graphDepth },
-            });
-          }}
-          onUseSelectionAsRoot={() => {
-            setPendingUseSelectionAsRoot(true);
-            postMessage("canvas.useSelectionAsRoot", { type: "requestSelection" });
-          }}
-          onClearRoot={() => {
-            setRootNodeId(null);
-            setInspectorNotice(null);
-          }}
+          onSelectNode={handleCanvasSelectNode}
+          onClearSelection={handleCanvasClearSelection}
+          onOpenNode={handleCanvasOpenNode}
+          onGenerateFromActive={handleGenerateFromActive}
+          onUseSelectionAsRoot={handleUseSelectionAsRoot}
+          onClearRoot={handleClearRoot}
           onExpandExternal={expandExternalFile}
           analysisDiagnostics={analysis?.diagnostics ?? []}
-          highlightedNodeIds={
-            effectiveFocusedFlow
-              ? [effectiveFocusedFlow.sourceId, effectiveFocusedFlow.targetId]
-              : []
-          }
+          highlightedNodeIds={highlightedNodeIds}
           highlightedEdgeId={effectiveFocusedFlow?.edgeId ?? null}
           traceActiveNodeId={traceActiveNodeId}
           runtimeActiveNodeId={runtimeActiveNodeId}
@@ -2115,11 +2151,19 @@ export default function App() {
 
         <Inspector
           collapsed={!inspectorOpen}
+          hostMode={hostState.currentHost}
+          sidebarLocation={hostState.sidebarLocation}
           placement={inspectorPlacement}
           effectivePlacement={effectiveInspectorPlacement}
           width={inspectorWidth}
           height={inspectorHeight}
           onPlacementChange={setInspectorPlacement}
+          onHostModeChange={(target, sidebarLocation) => {
+            postMessage("inspector.hostMode.change", {
+              type: "switchHost",
+              payload: { target, sidebarLocation },
+            });
+          }}
           onToggleCollapsed={() => setInspectorOpen((v) => !v)}
           activeFile={activeFile}
           selection={selection}

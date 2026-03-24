@@ -23,10 +23,11 @@ body.vscode-high-contrast .logoDark {
 }
 
 /* 공통 크기 */
-.brandLogoWide {
-  height: 30px;
+.brandLogoIcon {
+  height: 24px;
   width: auto;
   display: block;
+  flex: 0 0 auto;
 }
 
 .topbar {
@@ -55,6 +56,7 @@ body.vscode-high-contrast .logoDark {
   align-items: center;
   gap: 8px;
   color: var(--primary);
+  flex: 0 0 auto;
 }
 
 .brandTitle {
@@ -147,8 +149,8 @@ body.vscode-high-contrast .logoDark {
   max-height: 360px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 92%, black);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  background: var(--surface1);
+  box-shadow: var(--shadowElevated);
   overflow: hidden;
   z-index: 20;
 }
@@ -160,7 +162,7 @@ body.vscode-high-contrast .logoDark {
   gap: 12px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
 }
 
 .projectMenuTitle {
@@ -229,11 +231,11 @@ body.vscode-high-contrast .logoDark {
 }
 
 .projectMenuItem:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surfaceHover);
 }
 
 .projectMenuItem--active {
-  background: rgba(59, 130, 246, 0.12);
+  background: var(--accentSoft);
   color: var(--vscode-foreground);
 }
 
@@ -259,8 +261,8 @@ body.vscode-high-contrast .logoDark {
   padding: 6px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 94%, black);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  background: var(--surface1);
+  box-shadow: var(--shadowElevated);
   z-index: 20;
 }
 
@@ -280,7 +282,7 @@ body.vscode-high-contrast .logoDark {
 }
 
 .exportMenuItem:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surfaceHover);
 }
 
 .exportMenuItemTitle {
@@ -356,27 +358,27 @@ body.vscode-high-contrast .logoDark {
 
 .iconBtn--activeMenu {
   border-color: var(--border);
-  background: rgba(19, 91, 236, 0.14);
+  background: var(--accentSoft);
 }
 
 .topbar--traceOn {
-  border-bottom-color: rgba(56, 189, 248, 0.35);
-  box-shadow: inset 0 -1px 0 rgba(56, 189, 248, 0.2);
+  border-bottom-color: var(--outlineStrong);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 20%, transparent);
   background:
     linear-gradient(
       90deg,
-      rgba(56, 189, 248, 0.08),
-      rgba(2, 6, 23, 0) 32%,
-      rgba(2, 6, 23, 0)
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 32%,
+      transparent
     ),
     var(--bg);
 }
 
 .iconBtn--traceOn {
   position: relative;
-  border-color: rgba(56, 189, 248, 0.55);
-  background: rgba(56, 189, 248, 0.15);
-  color: rgba(186, 230, 253, 0.95);
+  border-color: var(--outlineStrong);
+  background: var(--accentSoft);
+  color: var(--accentStrong);
 }
 
 .traceDot {
@@ -386,8 +388,8 @@ body.vscode-high-contrast .logoDark {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: rgba(125, 211, 252, 1);
-  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.18);
+  background: var(--accentStrong);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
   animation: tracePulse 1.1s ease-in-out infinite;
 }
 
@@ -397,9 +399,9 @@ body.vscode-high-contrast .logoDark {
   letter-spacing: 0.3px;
   padding: 5px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(56, 189, 248, 0.45);
-  color: rgba(186, 230, 253, 0.95);
-  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid var(--outlineStrong);
+  color: var(--accentStrong);
+  background: var(--accentSoft);
 }
 
 .spin {
@@ -416,10 +418,10 @@ body.vscode-high-contrast .logoDark {
   0%,
   100% {
     opacity: 0.8;
-    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.18);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 0 7px rgba(56, 189, 248, 0.08);
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 8%, transparent);
   }
 }

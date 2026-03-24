@@ -49,7 +49,7 @@
   margin: 0;
   font-size: 14px;
   font-weight: 900;
-  color: #fff;
+  color: var(--fg);
 }
 
 .inspectorHeader p {
@@ -74,33 +74,33 @@
   margin: 10px 14px 0;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--outlineSubtle);
+  background: color-mix(in srgb, var(--surface1) 82%, transparent);
 }
 
 .inspectorNotice--info {
-  border-color: rgba(56, 189, 248, 0.35);
+  border-color: var(--outlineStrong);
 }
 
 .inspectorNotice--warning {
-  border-color: rgba(245, 158, 11, 0.48);
+  border-color: color-mix(in srgb, var(--warning) 52%, transparent);
 }
 
 .inspectorNotice--error {
-  border-color: rgba(248, 113, 113, 0.52);
+  border-color: color-mix(in srgb, var(--error) 54%, transparent);
 }
 
 .inspectorNoticeTitle {
   font-size: 12px;
   font-weight: 900;
-  color: rgba(226, 232, 240, 0.96);
+  color: color-mix(in srgb, var(--fg) 96%, transparent);
 }
 
 .inspectorNoticeDetail {
   margin-top: 4px;
   font-size: 11px;
   line-height: 1.45;
-  color: rgba(226, 232, 240, 0.72);
+  color: var(--textSoft);
 }
 
 .inspectorActions {
@@ -301,7 +301,7 @@
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.035);
+  background: color-mix(in srgb, var(--surface1) 78%, transparent);
   cursor: pointer;
   transition:
     border-color 120ms ease,
@@ -312,21 +312,21 @@
 
 .runtimeVarCard:hover {
   transform: translateY(-1px);
-  border-color: rgba(56, 189, 248, 0.3);
-  background: rgba(56, 189, 248, 0.08);
+  border-color: var(--outlineStrong);
+  background: var(--accentSoft);
 }
 
 .runtimeVarCard.isExpanded {
-  border-color: rgba(56, 189, 248, 0.38);
-  background: rgba(56, 189, 248, 0.1);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface1));
 }
 
 .runtimeVarCard.isPinned {
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.18);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .runtimeVarCard:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.5);
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
   outline-offset: 2px;
 }
 
@@ -390,17 +390,17 @@
 }
 
 .smallBtn {
-  background: #111827; /* 거의 블랙 */
-  color: #cbd5e1;
-  border: 1px solid #334155;
+  background: var(--surface2);
+  color: var(--textSoft);
+  border: 1px solid var(--outlineSubtle);
   transition: all 0.15s ease;
 }
 
 .smallBtn:hover {
-  background: #1d4ed8; /* deep blue */
-  border-color: #1d4ed8;
-  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.3);
-  color: white;
+  background: var(--surfaceActive);
+  border-color: color-mix(in srgb, var(--accent) 54%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--fg);
 }
 
 .inspectorFlowRow {
@@ -415,10 +415,12 @@
   margin-bottom: 10px;
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(56, 189, 248, 0.35);
+  border: 1px solid var(--outlineStrong);
   background:
-    linear-gradient(135deg, rgba(10, 22, 48, 0.94), rgba(7, 15, 30, 0.96));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--accent) 10%, var(--surface2)),
+      color-mix(in srgb, var(--surface3) 94%, black));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 6%, transparent);
   min-width: 0;
 }
 
@@ -437,7 +439,7 @@
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.9);
+  color: color-mix(in srgb, var(--fg) 90%, transparent);
   flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -446,9 +448,9 @@
 .inspectorFlowActiveBadge {
   padding: 3px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.12);
-  color: #7dd3fc;
+  border: 1px solid var(--outlineStrong);
+  background: var(--accentSoft);
+  color: color-mix(in srgb, var(--accent) 68%, var(--fg));
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -467,18 +469,18 @@
 
 .inspectorFlowRow:hover {
   transform: translateY(-1px);
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.08);
+  border-color: var(--outlineStrong);
+  background: var(--accentSoft);
 }
 
 .inspectorFlowRow--active {
-  border-color: rgba(56, 189, 248, 0.42);
-  background: rgba(56, 189, 248, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.14);
+  border-color: color-mix(in srgb, var(--accent) 48%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface1));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .inspectorFlowRow:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
   outline-offset: 2px;
 }
 
@@ -517,8 +519,8 @@
 }
 
 .inspectorCollapsedBtn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+  background: var(--surfaceHover);
 }
 
 /* Drag handle placed between canvas and inspector (App renders this div) */
@@ -529,6 +531,11 @@
 }
 
 .inspectorResizer--right {
+  width: 6px;
+  cursor: col-resize;
+}
+
+.inspectorResizer--left {
   width: 6px;
   cursor: col-resize;
 }
@@ -551,7 +558,15 @@
   bottom: 0;
   left: 2px;
   width: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--outlineSubtle);
+}
+
+.inspectorResizer--left::after {
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 2px;
+  background: var(--outlineSubtle);
 }
 
 .inspectorResizer--bottom::after {
@@ -559,7 +574,7 @@
   right: 0;
   top: 2px;
   height: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--outlineSubtle);
 }
 
 .inspectorResizer:hover::after,
@@ -568,8 +583,8 @@
 }
 
 .iconBtn--active {
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(2, 6, 23, 0.7);
+  border-color: var(--outlineStrong);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface2));
 }
 
 .inspectorMenu {
@@ -606,6 +621,12 @@
   color: var(--muted);
 }
 
+.inspectorMenuDivider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
 .inspectorMenuOption {
   width: 100%;
   display: flex;
@@ -622,12 +643,12 @@
 }
 
 .inspectorMenuOption:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surfaceHover);
 }
 
 .inspectorMenuOption.isActive {
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.12);
+  border-color: var(--outlineStrong);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface1));
 }
 
 .inspectorMenuOptionText {
@@ -649,6 +670,6 @@
 .inspectorMenuCheck {
   width: 14px;
   text-align: center;
-  color: #7dd3fc;
+  color: color-mix(in srgb, var(--accent) 68%, var(--fg));
   font-size: 10px;
 }

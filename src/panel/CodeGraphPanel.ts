@@ -77,6 +77,14 @@ function pruneGraphToFile(graph: GraphPayload, filePath: string) {
 }
 
 function summarizeInboundMessage(msg: WebviewToExtMessage) {
+  if (msg.type === "requestHostState") {
+    return {};
+  }
+  if (msg.type === "switchHost") {
+    return {
+      target: msg.payload.target,
+    };
+  }
   if (msg.type === "debugEvent") {
     return {
       event: msg.payload.event,
@@ -128,7 +136,12 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
   return {};
 }
 
+type HostKind = "panel" | "sidebar";
+type SidebarLocation = "left" | "right";
+
 export class CodeGraphPanel {
+  private static currentPanel: vscode.WebviewPanel | undefined;
+  private static currentSidebarView: vscode.WebviewView | undefined;
   private lastTextEditor: vscode.TextEditor | undefined;
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
@@ -157,7 +170,8 @@ export class CodeGraphPanel {
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly panel: vscode.WebviewPanel,
+    private readonly panel: vscode.WebviewPanel | vscode.WebviewView,
+    private readonly hostKind: HostKind,
   ) {}
 
   private static getInitialPanelColumn(): vscode.ViewColumn {
@@ -169,6 +183,14 @@ export class CodeGraphPanel {
   }
 
   static open(context: vscode.ExtensionContext) {
+    if (CodeGraphPanel.currentPanel) {
+      CodeGraphPanel.currentPanel.reveal(
+        CodeGraphPanel.currentPanel.viewColumn ?? CodeGraphPanel.getInitialPanelColumn(),
+        false,
+      );
+      return;
+    }
+
     const panel = vscode.window.createWebviewPanel(
       "codegraph",
       "CodeGraph",
@@ -180,13 +202,60 @@ export class CodeGraphPanel {
         ],
       },
     );
+    panel.iconPath = {
+      light: vscode.Uri.joinPath(context.extensionUri, "assets", "logo.svg"),
+      dark: vscode.Uri.joinPath(context.extensionUri, "assets", "logo2.svg"),
+    };
+    CodeGraphPanel.currentPanel = panel;
 
-    const inst = new CodeGraphPanel(context, panel);
+    panel.onDidDispose(() => {
+      if (CodeGraphPanel.currentPanel === panel) {
+        CodeGraphPanel.currentPanel = undefined;
+      }
+    });
+
+    const inst = new CodeGraphPanel(context, panel, "panel");
     inst.init();
+  }
+
+  static resolveView(
+    context: vscode.ExtensionContext,
+    view: vscode.WebviewView,
+  ) {
+    CodeGraphPanel.currentSidebarView = view;
+    view.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.file(path.join(context.extensionPath, "media", "webview")),
+      ],
+    };
+
+    view.onDidDispose(() => {
+      if (CodeGraphPanel.currentSidebarView === view) {
+        CodeGraphPanel.currentSidebarView = undefined;
+      }
+    });
+
+    const inst = new CodeGraphPanel(context, view, "sidebar");
+    inst.init();
+  }
+
+  static async revealSidebar() {
+    if (CodeGraphPanel.currentSidebarView) {
+      CodeGraphPanel.currentSidebarView.show(false);
+      return;
+    }
+
+    try {
+      await vscode.commands.executeCommand("codegraph.sidebar.focus");
+    } catch {
+      await vscode.commands.executeCommand("workbench.view.extension.codegraph");
+    }
   }
 
   private init() {
     this.panel.webview.html = getWebviewHtml(this.context, this.panel.webview);
+    this.postHostState();
     this.runtimeDebugBridge = new RuntimeDebugBridge((payload) => {
       this.panel.webview.postMessage({
         type: "runtimeDebug",
@@ -212,6 +281,15 @@ export class CodeGraphPanel {
           }
           if (msg.type === "requestSelection") {
             return this.postSelection();
+          }
+          if (msg.type === "requestHostState") {
+            return this.postHostState();
+          }
+          if (msg.type === "switchHost") {
+            return await this.switchHost(
+              msg.payload.target,
+              msg.payload.sidebarLocation,
+            );
           }
           if (msg.type === "analyzeActiveFile") {
             if (msg.payload?.graphDepth !== undefined) {
@@ -399,6 +477,62 @@ export class CodeGraphPanel {
     });
   }
 
+  private postHostState() {
+    const payload: Extract<
+      ExtToWebviewMessage,
+      { type: "hostState" }
+    >["payload"] = {
+      currentHost: this.hostKind,
+      sidebarLocation: this.getSidebarLocation(),
+    };
+
+    this.panel.webview.postMessage({
+      type: "hostState",
+      payload,
+    } satisfies ExtToWebviewMessage);
+  }
+
+  private async switchHost(target: HostKind, sidebarLocation?: SidebarLocation) {
+    if (target === this.hostKind) {
+      if (target === "sidebar" && sidebarLocation) {
+        await this.setSidebarLocation(sidebarLocation);
+      }
+      this.postHostState();
+      return;
+    }
+
+    if (target === "panel") {
+      CodeGraphPanel.open(this.context);
+      if (this.hostKind === "sidebar") {
+        await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility");
+      }
+      return;
+    }
+
+    if (sidebarLocation) {
+      await this.setSidebarLocation(sidebarLocation);
+    }
+    await CodeGraphPanel.revealSidebar();
+    if (this.hostKind === "panel" && "dispose" in this.panel) {
+      this.panel.dispose();
+    }
+  }
+
+  private getSidebarLocation(): SidebarLocation {
+    const configured = vscode.workspace
+      .getConfiguration("workbench")
+      .get<string>("sideBar.location");
+    return configured === "right" ? "right" : "left";
+  }
+
+  private async setSidebarLocation(location: SidebarLocation) {
+    if (this.getSidebarLocation() === location) {
+      return;
+    }
+
+    await vscode.commands.executeCommand("workbench.action.toggleSidebarPosition");
+  }
+
   private invalidateWorkspaceCache() {
     this.cachedAt = 0;
     this.cachedFilePaths = [];
@@ -539,16 +673,22 @@ export class CodeGraphPanel {
   }
 
   private getPreferredEditorColumn(): vscode.ViewColumn {
-    const panelColumn = this.panel.viewColumn;
-    const visibleTextEditor = vscode.window.visibleTextEditors.find(
-      (editor) => editor.viewColumn && editor.viewColumn !== panelColumn,
-    );
+    if ("viewColumn" in this.panel) {
+      const panelColumn = this.panel.viewColumn;
+      const visibleTextEditor = vscode.window.visibleTextEditors.find(
+        (editor) => editor.viewColumn && editor.viewColumn !== panelColumn,
+      );
 
-    if (visibleTextEditor?.viewColumn) {
-      return visibleTextEditor.viewColumn;
+      if (visibleTextEditor?.viewColumn) {
+        return visibleTextEditor.viewColumn;
+      }
     }
 
-    return vscode.ViewColumn.Beside;
+    return (
+      vscode.window.activeTextEditor?.viewColumn ??
+      vscode.window.visibleTextEditors[0]?.viewColumn ??
+      vscode.ViewColumn.Beside
+    );
   }
 
   private getEditor(): vscode.TextEditor | undefined {

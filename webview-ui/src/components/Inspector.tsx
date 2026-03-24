@@ -37,8 +37,10 @@ type RuntimeDebugState = Extract<
   { type: "runtimeDebug" }
 >["payload"];
 
-export type InspectorPlacement = "auto" | "right" | "bottom";
+export type InspectorPlacement = "auto" | "left" | "right" | "bottom";
 export type EffectiveInspectorPlacement = Exclude<InspectorPlacement, "auto">;
+type HostMode = "sidebar" | "panel";
+type SidebarLocation = "left" | "right";
 type CollapseDirection = "vertical" | "horizontal";
 type SectionKey =
   | "snapshot"
@@ -80,8 +82,11 @@ type Props = {
   collapsed?: boolean;
   width?: number;
   height?: number;
+  hostMode: HostMode;
+  sidebarLocation: SidebarLocation;
   placement: InspectorPlacement;
   effectivePlacement: EffectiveInspectorPlacement;
+  onHostModeChange: (mode: HostMode, sidebarLocation?: SidebarLocation) => void;
   onPlacementChange: (placement: InspectorPlacement) => void;
   onToggleCollapsed?: () => void;
 };
@@ -364,8 +369,11 @@ export function Inspector({
   collapsed = false,
   width,
   height,
+  hostMode,
+  sidebarLocation,
   placement,
   effectivePlacement,
+  onHostModeChange,
   onPlacementChange,
   onToggleCollapsed,
 }: Props) {
@@ -631,12 +639,16 @@ export function Inspector({
   const collapseIcon =
     effectivePlacement === "bottom" ? (
       <ChevronDown className="icon" />
+    ) : effectivePlacement === "left" ? (
+      <ChevronLeft className="icon" />
     ) : (
       <ChevronRight className="icon" />
     );
   const expandIcon =
     effectivePlacement === "bottom" ? (
       <ChevronUp className="icon" />
+    ) : effectivePlacement === "left" ? (
+      <ChevronRight className="icon" />
     ) : (
       <ChevronLeft className="icon" />
     );
@@ -721,6 +733,60 @@ export function Inspector({
             {settingsOpen ? (
               <div className="inspectorMenu" role="menu" aria-label="Inspector Settings">
                 <div className="inspectorMenuHeader">
+                  <span>Display Mode</span>
+                  <span className="inspectorMenuHint">
+                    {hostMode === "sidebar"
+                      ? `Sidebar ${sidebarLocation === "right" ? "Right" : "Left"}`
+                      : "Editor Panel"}
+                  </span>
+                </div>
+
+                {[
+                  ["sidebar-left", "Sidebar Left", "Dock CodeGraph in the left sidebar"],
+                  ["sidebar-right", "Sidebar Right", "Dock CodeGraph in the right sidebar"],
+                  ["panel", "Editor Panel", "Open CodeGraph as a separate editor tab"],
+                ].map(([value, label, description]) => {
+                  const active =
+                    value === "panel"
+                      ? hostMode === "panel"
+                      : hostMode === "sidebar" &&
+                        sidebarLocation === (value === "sidebar-right" ? "right" : "left");
+                  return (
+                    <button
+                      key={value}
+                      className={[
+                        "inspectorMenuOption",
+                        active ? "isActive" : "",
+                      ].join(" ")}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        if (value === "panel") {
+                          onHostModeChange("panel");
+                        } else {
+                          onHostModeChange(
+                            "sidebar",
+                            value === "sidebar-right" ? "right" : "left",
+                          );
+                        }
+                        setSettingsOpen(false);
+                      }}
+                    >
+                      <span className="inspectorMenuOptionText">
+                        <strong>{label}</strong>
+                        <small>{description}</small>
+                      </span>
+                      <span className="inspectorMenuCheck" aria-hidden="true">
+                        {active ? "ok" : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                <div className="inspectorMenuDivider" />
+
+                <div className="inspectorMenuHeader">
                   <span>Inspector Position</span>
                   <span className="inspectorMenuHint">
                     {placement === "auto"
@@ -731,6 +797,7 @@ export function Inspector({
 
                 {[
                   ["auto", "Auto", "Follow window width"],
+                  ["left", "Left", "Keep inspector on the left"],
                   ["right", "Right", "Keep inspector on the side"],
                   ["bottom", "Bottom", "Keep inspector under the canvas"],
                 ].map(([value, label, description]) => {

@@ -148,12 +148,12 @@ export function Topbar({
       <div className="topbarLeft">
         <div className="brand">
           <img
-            className="brandLogoWide logoLight"
+            className="brandLogoIcon logoLight"
             src={logoLightUrl}
             alt="CodeGraph"
           />
           <img
-            className="brandLogoWide logoDark"
+            className="brandLogoIcon logoDark"
             src={logoDarkUrl}
             alt="CodeGraph"
           />

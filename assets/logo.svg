@@ -6,8 +6,8 @@
     </linearGradient>
   </defs>
 
-  <!-- safe margin frame: content lives within 32..224 -->
-  <g fill="none" stroke="none">
+  <!-- Expanded slightly so the activity bar slot looks fuller -->
+  <g fill="none" stroke="none" transform="translate(128 128) scale(1.36) translate(-128 -128)">
     <!-- Modules -->
     <rect x="44" y="62" width="108" height="30" rx="8" fill="url(#cgA_grad)"/>
     <rect x="44" y="106" width="124" height="30" rx="8" fill="#0F172A" opacity="0.90"/>

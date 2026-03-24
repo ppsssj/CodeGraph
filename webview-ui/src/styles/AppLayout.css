@@ -28,6 +28,10 @@
   flex-direction: row;
 }
 
+.main--effective-left {
+  flex-direction: row-reverse;
+}
+
 .main--effective-bottom {
   flex-direction: column;
 }

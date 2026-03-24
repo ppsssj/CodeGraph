@@ -2,6 +2,14 @@ export type WebviewToExtMessage =
   | { type: "requestActiveFile" }
   | { type: "requestWorkspaceFiles" }
   | { type: "requestSelection" }
+  | { type: "requestHostState" }
+  | {
+      type: "switchHost";
+      payload: {
+        target: "sidebar" | "panel";
+        sidebarLocation?: "left" | "right";
+      };
+    }
   | {
       type: "analyzeActiveFile";
       payload?: { traceMode?: boolean; graphDepth?: number };
@@ -280,6 +288,13 @@ export type AnalysisRequestMeta = {
 };
 
 export type ExtToWebviewMessage =
+  | {
+      type: "hostState";
+      payload: {
+        currentHost: "sidebar" | "panel";
+        sidebarLocation: "left" | "right";
+      };
+    }
   | {
       type: "activeFile";
       payload: {

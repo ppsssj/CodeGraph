@@ -10,14 +10,38 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:codegraph.open"
+    "onCommand:codegraph.open",
+    "onCommand:codegraph.openSidebar",
+    "onView:codegraph.sidebar"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codegraph",
+          "title": "CodeGraph",
+          "icon": "assets/logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "codegraph": [
+        {
+          "id": "codegraph.sidebar",
+          "type": "webview",
+          "name": "CodeGraph"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "codegraph.open",
-        "title": "CodeGraph: Open"
+        "title": "CodeGraph: Open Editor Panel"
+      },
+      {
+        "command": "codegraph.openSidebar",
+        "title": "CodeGraph: Focus Sidebar View"
       }
     ]
   },
