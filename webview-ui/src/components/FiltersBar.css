@@ -22,6 +22,7 @@
 }
 
 .chip {
+  --chip-accent: var(--primary);
   height: 24px;
   border-radius: 6px;
   border: 1px solid transparent;
@@ -38,18 +39,42 @@
   white-space: nowrap;
 }
 
+.chip--all {
+  --chip-accent: var(--primary);
+}
+
+.chip--functions {
+  --chip-accent: var(--symbolFunction);
+}
+
+.chip--classes {
+  --chip-accent: var(--symbolClass);
+}
+
+.chip--files {
+  --chip-accent: var(--accent);
+}
+
+.chip--interfaces {
+  --chip-accent: var(--symbolInterface);
+}
+
+.chip--variables {
+  --chip-accent: var(--symbolExternal);
+}
+
 .chip:hover {
   filter: brightness(1.05);
 }
 
 .chip--active {
-  background: rgba(19, 91, 236, 0.18);
-  border-color: rgba(19, 91, 236, 0.35);
-  color: #bcd2ff;
+  background: color-mix(in srgb, var(--chip-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--chip-accent) 38%, transparent);
+  color: color-mix(in srgb, var(--chip-accent) 68%, var(--fg));
 }
 
 .chipCheck {
-  color: var(--primary);
+  color: inherit;
   font-weight: 900;
 }
 

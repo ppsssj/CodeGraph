@@ -49,7 +49,13 @@ export function FiltersBar({ active, onChange }: Props) {
         return (
           <button
             key={c.key}
-            className={`chip ${isActive ? "chip--active" : ""}`}
+            className={[
+              "chip",
+              `chip--${c.key}`,
+              isActive ? "chip--active" : "",
+            ]
+              .join(" ")
+              .trim()}
             type="button"
             onClick={() => toggleChip(c.key)}
           >

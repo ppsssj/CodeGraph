@@ -5,106 +5,106 @@
 </p>
 
 <p align="center">
-  VS Code extension + React webview for exploring TypeScript/JavaScript code as an interactive graph.
+  VS Code 안에서 TypeScript/JavaScript 코드를 인터랙티브 그래프로 탐색하기 위한 확장 + React 웹뷰 UI입니다.
 </p>
 
 ---
 
-## Overview
+## 개요
 
-CodeGraph analyzes the active TypeScript/JavaScript file and renders a graph of files, symbols, and relationships inside VS Code.
+CodeGraph는 현재 활성화된 TypeScript/JavaScript 파일을 분석하고, 파일/심볼/관계를 그래프로 렌더링합니다.
 
-It supports two host modes:
+CodeGraph는 두 가지 호스트 모드를 지원합니다.
 
-- `Sidebar View`: a docked webview inside the CodeGraph activity bar container
-- `Editor Panel`: a detachable webview panel that opens like a normal editor tab
+- `Sidebar View`: CodeGraph activity bar 컨테이너 안에 도킹되는 사이드바 웹뷰
+- `Editor Panel`: 일반 에디터 탭처럼 열리는 분리형 웹뷰 패널
 
-The extension is split into two parts:
+프로젝트는 크게 두 부분으로 나뉩니다.
 
-- `src/`: VS Code extension host, workspace access, analysis, commands, debugger wiring
-- `webview-ui/`: React + Vite graph UI rendered inside the webview
+- `src/`: VS Code extension host, 워크스페이스 접근, 분석, 명령어, 디버거 연동
+- `webview-ui/`: 웹뷰 안에서 렌더링되는 React + Vite 기반 그래프 UI
 
 ---
 
-## Demo
+## 데모
 
 ![Demo](assets/demo5.png)
 
-## Node Click Walkthrough
+## 노드 클릭 데모
 
 ![Node Click Walkthrough](assets/NodeClick_demo.gif)
 
-## Trace Walkthrough
+## Trace 데모
 
 ![Trace Walkthrough](assets/Trace_demo.gif)
 
-## Runtime Debug Walkthrough
+## Runtime Debug 데모
 
 ![Runtime Debug Walkthrough](assets/debug_demo.gif)
 
-## Error Demo
+## 에러 데모
 
 ![Error Demo](assets/error_demo.png)
 
 ---
 
-## Core Features
+## 핵심 기능
 
-- Analyze the active TypeScript/JavaScript file and render an interactive graph
-- Render `file`, `function`, `method`, `class`, `interface`, `type`, `enum`, and `external` nodes
-- Render `calls`, `constructs`, `references`, `updates`, and `dataflow` edges
-- Open CodeGraph either in the sidebar or in a separate editor panel
-- Switch host mode directly from Inspector settings:
+- 활성 TypeScript/JavaScript 파일을 분석하고 인터랙티브 그래프 렌더링
+- `file`, `function`, `method`, `class`, `interface`, `type`, `enum`, `external` 노드 표시
+- `calls`, `constructs`, `references`, `updates`, `dataflow` 엣지 표시
+- 사이드바와 에디터 패널 두 방식으로 CodeGraph 열기 지원
+- Inspector 설정에서 바로 호스트 모드 전환 지원
   - `Sidebar Left`
   - `Sidebar Right`
   - `Editor Panel`
-- Move the Inspector between:
+- Inspector 위치 변경 지원
   - `Auto`
   - `Left`
   - `Right`
   - `Bottom`
-- Search nodes, files, and symbols from the top bar
-- Filter visible graph content by chip:
+- 상단 검색창에서 노드, 파일, 심볼 검색
+- 필터 칩으로 그래프 내용 필터링
   - `All`
   - `Functions`
   - `Classes`
   - `Files`
   - `Interfaces`
   - `Variables`
-- Group results as `folder -> file -> symbol`
-- Collapse and expand folder groups and file groups
-- Keep the active file and active folder open by default while other groups start collapsed
-- Support root selection flows such as "use selection as root"
-- Highlight focused parameter-flow edges and surface them in the Inspector
-- Expand external nodes into the current graph
-- Follow VS Code debugger state and map the paused frame onto the graph
-- Export the current graph as structured JSON or a JPG snapshot
+- `folder -> file -> symbol` 구조로 시각 그룹화
+- 폴더 그룹 / 파일 그룹 접기와 펼치기 지원
+- 현재 활성 파일과 활성 파일이 속한 폴더는 기본 펼침, 나머지는 기본 접힘
+- 선택 영역을 root로 사용하는 흐름 지원
+- parameter flow 엣지 하이라이트 및 Inspector 연동
+- external 노드를 현재 그래프 안으로 확장
+- VS Code 디버거 상태를 따라가며 현재 paused frame을 그래프에 매핑
+- 현재 그래프를 JSON 또는 JPG로 export
 
 ---
 
-## Opening CodeGraph
+## CodeGraph 열기
 
-You can open CodeGraph in two ways.
+CodeGraph는 두 가지 방식으로 열 수 있습니다.
 
-### Commands
+### 명령어
 
 - `CodeGraph: Open Editor Panel`
 - `CodeGraph: Focus Sidebar View`
 
-Internal command ids:
+내부 command id:
 
 - `codegraph.open`
 - `codegraph.openSidebar`
 
 ### Activity Bar
 
-The extension contributes a `CodeGraph` activity bar icon. Opening it focuses the sidebar-hosted webview view.
+확장은 `CodeGraph` activity bar 아이콘을 추가합니다. 이 아이콘을 열면 사이드바 웹뷰가 포커스됩니다.
 
 ---
 
-## Graph Model
+## 그래프 모델
 
-The analyzer currently emits a graph with:
+현재 analyzer는 아래 구조의 그래프를 생성합니다.
 
 ```ts
 type GraphPayload = {
@@ -135,48 +135,48 @@ type GraphPayload = {
 };
 ```
 
-Notes:
+참고:
 
-- folder groups are currently a UI/layout layer, not analyzer graph nodes
-- folder grouping is used to organize file groups in depth-expanded graphs
+- 폴더 그룹은 analyzer graph node가 아니라 UI/레이아웃 계층입니다.
+- depth 확장 시 많은 파일을 정리해서 보여주기 위해 폴더 그룹을 사용합니다.
 
 ---
 
-## Canvas Behavior
+## 캔버스 동작
 
-### Node and Group Interaction
+### 노드 및 그룹 상호작용
 
-- `Single click` on a node selects it
-- `Double click` on a node opens the matching source location
-- child symbol rows inside compound nodes support selection and navigation
-- folder groups and file groups can be collapsed and expanded
-- when graph re-layout happens after opening a folder or file, the camera follows the interacted target
+- `Single click`: 노드 선택
+- `Double click`: 해당 소스 위치 열기
+- compound node 내부 child symbol row도 선택/이동 지원
+- 폴더 그룹과 파일 그룹은 접기/펼치기 가능
+- 폴더/파일을 열어서 재배치가 일어나면, 카메라는 방금 상호작용한 대상을 따라감
 
 ### Top Bar
 
-The top bar supports:
+상단 바에서는 다음 기능을 사용할 수 있습니다.
 
-- active file selection
-- depth selection
-- graph search
-- refresh/re-analyze actions
-- layout/graph utilities
-- export actions
+- 활성 파일 선택
+- depth 선택
+- 그래프 검색
+- refresh / 재분석
+- 레이아웃 및 그래프 유틸리티
+- export
 
 ### Parameter Flow
 
-- parameter/data-flow edges are rendered in a dedicated lane
-- focused parameter flow is highlighted on the canvas
-- parameter flow details are shown in the Inspector
-- parameter flow overlays are layered above normal edges, while Inspector/canvas overlay panels remain above them
+- parameter/data-flow 엣지는 별도 lane으로 렌더링
+- 현재 포커스된 parameter flow를 캔버스에서 강조
+- Inspector에서 현재 flow 상세 정보 표시
+- parameter flow overlay는 일반 엣지보다 위에 보이고, Inspector/캔버스 overlay 패널은 그보다 위에 표시
 
 ---
 
 ## Inspector
 
-The Inspector is now both a detail pane and a settings surface.
+Inspector는 상세 정보 패널이자 설정 화면 역할도 함께 합니다.
 
-### Inspector Content Sections
+### Inspector 섹션
 
 - `Active File Snapshot`
 - `Root`
@@ -186,60 +186,67 @@ The Inspector is now both a detail pane and a settings surface.
 - `Param Flow`
 - `Analysis`
 
-### Inspector Settings
+### Inspector 설정
 
-Clicking the settings icon switches the Inspector itself into settings mode.
+설정 아이콘을 누르면 작은 팝업이 뜨는 대신, Inspector 자체가 설정 화면으로 전환됩니다.
 
-Inside settings mode you can:
+설정 화면에서 할 수 있는 일:
 
-- switch display mode between sidebar-left, sidebar-right, and editor-panel
-- change Inspector placement between auto, left, right, and bottom
-- show or hide sections
-- reorder sections
-- drag sections to reorder them
+- display mode 변경
+  - `Sidebar Left`
+  - `Sidebar Right`
+  - `Editor Panel`
+- Inspector 위치 변경
+  - `Auto`
+  - `Left`
+  - `Right`
+  - `Bottom`
+- 섹션 숨김/표시
+- 섹션 순서 변경
+- 드래그로 섹션 재정렬
 
-Section layout preferences are persisted locally in the webview.
-
----
-
-## Trace Mode
-
-Trace mode helps explain how CodeGraph built the current graph.
-
-- trace playback steps through graph construction events
-- newly introduced trace nodes are visually focused
-- parameter-flow trace steps highlight the active flow edge
-- the Inspector surfaces the currently focused trace flow
-
-Use Trace mode when you want to understand graph construction rather than runtime execution.
+섹션 레이아웃 설정은 웹뷰 로컬 상태로 저장됩니다.
 
 ---
 
-## Runtime Debug Mode
+## Trace 모드
 
-Debug mode listens to VS Code debug sessions and maps the paused runtime frame onto the existing graph.
+Trace 모드는 CodeGraph가 현재 그래프를 어떻게 만들었는지 설명하는 데 초점이 있습니다.
 
-- reads the current paused stack frame from VS Code
-- matches `file/line` data back to graph nodes
-- highlights the runtime-active node
-- shows frame information in the Inspector
-- shows a compact set of important variables
-- supports stepping through code while the graph focus updates
+- 그래프 구성 이벤트를 순차적으로 재생
+- 새로 등장한 trace 노드를 시각적으로 강조
+- parameter-flow trace 단계에서 해당 flow 엣지 강조
+- Inspector에 현재 trace flow 정보 표시
 
-Recommended flow:
+그래프 생성 과정을 이해하고 싶을 때 적합합니다.
 
-1. Open the target file.
-2. Generate the graph.
-3. Start a normal VS Code debug session with breakpoints.
-4. Let execution pause.
-5. Step through code and watch CodeGraph follow the runtime frame.
+---
 
-### Trace Mode vs Debug Mode
+## Runtime Debug 모드
 
-| Mode | What it shows | Source of truth | Best for |
+Debug 모드는 VS Code 디버그 세션과 연결되어 현재 paused frame을 기존 그래프에 매핑합니다.
+
+- 현재 paused stack frame을 읽음
+- `file/line` 정보를 그래프 노드와 매칭
+- runtime-active node 강조
+- Inspector에 frame 정보 표시
+- 핵심 변수 목록 표시
+- Step Over / Step Into 같은 디버그 이동 시 그래프 포커스 갱신
+
+추천 흐름:
+
+1. 대상 파일을 엽니다.
+2. 그래프를 생성합니다.
+3. 일반 VS Code 디버그 세션을 시작합니다.
+4. 실행이 pause되도록 합니다.
+5. step 하면서 CodeGraph가 runtime frame을 따라가는지 봅니다.
+
+### Trace 모드와 Debug 모드 차이
+
+| 모드 | 보여주는 것 | 기준 데이터 | 적합한 용도 |
 | --- | --- | --- | --- |
-| `Trace Mode` | how the graph was constructed | analyzer trace events | understanding graph generation |
-| `Debug Mode` | where execution is currently paused | VS Code debugger state | following real runtime execution |
+| `Trace Mode` | 그래프가 어떻게 만들어졌는지 | analyzer trace event | 그래프 생성 과정 이해 |
+| `Debug Mode` | 현재 실행이 어디에 멈춰 있는지 | VS Code debugger 상태 | 실제 런타임 흐름 추적 |
 
 ---
 
@@ -247,14 +254,14 @@ Recommended flow:
 
 ### JSON Export
 
-The JSON export saves:
+JSON export에는 다음 내용이 포함됩니다.
 
-- graph nodes and edges
-- active file information
+- graph nodes / edges
+- active file 정보
 - analysis metadata
-- UI state such as filter, search query, selection, root, and Inspector layout
+- filter, search query, selection, root, Inspector layout 같은 UI 상태
 
-Example schema:
+예시 스키마:
 
 ```json
 {
@@ -290,51 +297,51 @@ Example schema:
 
 ### JPG Snapshot
 
-The JPG export captures the current graph canvas as an image.
+JPG export는 현재 그래프 캔버스를 이미지로 저장합니다.
 
-Notes:
+참고:
 
-- it is a rendered snapshot, not a structured format
-- overlay controls and utility chrome are filtered out where possible
-- it is useful for issues, docs, chat, and quick sharing
+- 구조화된 그래프 포맷이 아니라 렌더된 스냅샷입니다.
+- overlay 컨트롤이나 유틸리티 UI는 가능한 한 제외해서 저장합니다.
+- 이슈 공유, 문서, 채팅에 빠르게 붙일 때 유용합니다.
 
 ---
 
-## Message Protocol
+## 메시지 프로토콜
 
 ### Webview -> Extension
 
-| Type | Description |
+| Type | 설명 |
 | --- | --- |
-| `requestActiveFile` | Request current active editor info |
-| `requestWorkspaceFiles` | Request workspace root and file list |
-| `requestSelection` | Request current editor selection |
-| `requestHostState` | Request current host kind and sidebar location |
-| `analyzeActiveFile` | Analyze the active file |
-| `analyzeWorkspace` | Analyze from workspace context |
-| `selectWorkspaceFile` | Open a file from the workspace picker |
-| `expandNode` | Analyze and merge graph data for an external file |
-| `setGraphDepth` | Update graph depth |
-| `openLocation` | Reveal a source location in the editor |
-| `saveExportFile` | Save a JSON or JPG export through VS Code |
-| `switchHost` | Switch between sidebar and editor panel, optionally changing sidebar side |
+| `requestActiveFile` | 현재 active editor 정보 요청 |
+| `requestWorkspaceFiles` | workspace root / file list 요청 |
+| `requestSelection` | 현재 editor selection 요청 |
+| `requestHostState` | 현재 host kind와 sidebar 위치 요청 |
+| `analyzeActiveFile` | 현재 active file 분석 |
+| `analyzeWorkspace` | workspace 기준 분석 |
+| `selectWorkspaceFile` | workspace picker에서 파일 열기 |
+| `expandNode` | external file을 분석해서 현재 graph에 병합 |
+| `setGraphDepth` | graph depth 변경 |
+| `openLocation` | 소스 위치 열기 |
+| `saveExportFile` | JSON/JPG export를 VS Code 저장 다이얼로그로 저장 |
+| `switchHost` | sidebar / editor panel 전환, 필요 시 sidebar 방향도 변경 |
 
 ### Extension -> Webview
 
-| Type | Description |
+| Type | 설명 |
 | --- | --- |
-| `activeFile` | Active editor payload |
-| `workspaceFiles` | Workspace root and file list |
-| `selection` | Current selection payload |
-| `analysisResult` | Graph, diagnostics, trace, and metadata |
-| `runtimeDebug` | Debug session, frame, and variable snapshot |
-| `hostState` | Current host kind and sidebar location |
-| `uiNotice` | Toast/canvas/inspector notice |
-| `flowExportResult` | Result of JSON/JPG export save |
+| `activeFile` | active editor payload |
+| `workspaceFiles` | workspace root / file list |
+| `selection` | 현재 selection payload |
+| `analysisResult` | graph, diagnostics, trace, metadata |
+| `runtimeDebug` | debug session, frame, variable snapshot |
+| `hostState` | 현재 host kind와 sidebar 위치 |
+| `uiNotice` | toast / canvas / inspector notice |
+| `flowExportResult` | JSON/JPG export 저장 결과 |
 
 ---
 
-## Architecture
+## 아키텍처
 
 ```mermaid
 flowchart LR
@@ -352,14 +359,14 @@ flowchart LR
 
 ---
 
-## Requirements
+## 요구 사항
 
 - Node.js 18+
 - VS Code 1.108+
 
 ---
 
-## Install
+## 설치
 
 ```bash
 npm install
@@ -369,61 +376,61 @@ npm install
 
 ---
 
-## Development
+## 개발
 
-### Run the webview UI build
+### 웹뷰 빌드
 
 ```bash
 cd webview-ui
 npm run build
 ```
 
-### Run the extension
+### 확장 실행
 
-Open the repo in VS Code and press `F5` to launch an Extension Development Host.
+VS Code에서 이 저장소를 열고 `F5`를 눌러 Extension Development Host를 실행합니다.
 
-### Build everything
+### 전체 빌드
 
 ```bash
 npm run build:all
 ```
 
-This runs:
+이 명령은 다음을 순서대로 실행합니다.
 
-1. the webview build
-2. webview asset copy into `media/webview`
+1. 웹뷰 빌드
+2. `media/webview`로 웹뷰 산출물 복사
 3. extension TypeScript compile
 
 ---
 
-## Repo Structure
+## 저장소 구조
 
 ```text
 .
 |-- src/                # VS Code extension source
 |-- webview-ui/         # React + Vite webview UI
-|-- media/webview/      # generated webview build output
+|-- media/webview/      # 생성된 webview build output
 |-- scripts/            # helper scripts
-|-- assets/             # logos and demo assets
+|-- assets/             # 로고 및 데모 리소스
 |-- package.json
 `-- README.md
 ```
 
 ---
 
-## Current Notes
+## 현재 참고 사항
 
-- best supported target is TypeScript/JavaScript code inside a normal VS Code workspace
-- folder grouping is visual organization, not part of the analyzer graph schema
-- sidebar-right support works by switching the VS Code sidebar location
-- sidebar and editor panel can both be used, but they are separate webview hosts
+- 가장 잘 지원하는 대상은 일반적인 VS Code workspace 안의 TypeScript/JavaScript 코드입니다.
+- 폴더 그룹은 analyzer graph schema가 아니라 시각 정리용 계층입니다.
+- `Sidebar Right`는 CodeGraph만 따로 옮기는 방식이 아니라 VS Code sidebar 위치를 전환하는 방식입니다.
+- sidebar host와 editor panel host는 둘 다 지원하지만, 서로 별도 웹뷰 호스트입니다.
 
 ---
 
-## Roadmap
+## 로드맵
 
-- [ ] export full graph bounds instead of only the visible rendered canvas region
-- [ ] add import support for previously exported JSON graph files
-- [ ] improve analyzer precision for call graph and external references
-- [ ] incremental analysis for larger workspaces
-- [ ] add more export presets such as PNG or SVG
+- [ ] 현재 보이는 캔버스 영역이 아니라 전체 그래프 bounds 기준으로 이미지 export 개선
+- [ ] 기존 JSON export를 다시 불러오는 import 지원
+- [ ] call graph / external reference analyzer 정밀도 개선
+- [ ] 대형 workspace를 위한 incremental analysis
+- [ ] PNG / SVG 같은 추가 export preset 지원
