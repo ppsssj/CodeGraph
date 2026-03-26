@@ -5,23 +5,24 @@
 </p>
 
 <p align="center">
-  VS Code extension + React webview for exploring TypeScript/JavaScript code as a graph.
+  VS Code extension + React webview for exploring TypeScript/JavaScript code as an interactive graph.
 </p>
 
 ---
 
 ## Overview
 
-CodeGraph analyzes the active file in your workspace and renders:
+CodeGraph analyzes the active TypeScript/JavaScript file and renders a graph of files, symbols, and relationships inside VS Code.
 
-- file, function, method, class, interface, type, enum, and external nodes
-- call edges, reference edges, and parameter/data-flow edges
-- inspector details, diagnostics, trace mode playback, and runtime debug overlays
+It supports two host modes:
 
-It is split into two parts:
+- `Sidebar View`: a docked webview inside the CodeGraph activity bar container
+- `Editor Panel`: a detachable webview panel that opens like a normal editor tab
 
-- `src/`: VS Code extension host, workspace access, analysis, save dialogs
-- `webview-ui/`: React + Vite graph UI rendered inside a VS Code webview
+The extension is split into two parts:
+
+- `src/`: VS Code extension host, workspace access, analysis, commands, debugger wiring
+- `webview-ui/`: React + Vite graph UI rendered inside the webview
 
 ---
 
@@ -41,89 +42,219 @@ It is split into two parts:
 
 ![Runtime Debug Walkthrough](assets/debug_demo.gif)
 
-The intended flow is:
-
-1. open the sample workspace
-2. generate the graph once
-3. start a VS Code debug session
-4. step through code while CodeGraph follows the active frame
-
 ## Error Demo
 
 ![Error Demo](assets/error_demo.png)
 
 ---
 
-## Key Features
+## Core Features
 
 - Analyze the active TypeScript/JavaScript file and render an interactive graph
-- Canvas node interactions split selection and navigation for more stable graph rendering
-- Trace mode to step through graph construction events
-- Debug mode to follow the currently paused runtime frame from the VS Code debugger
-- Inspector panel with diagnostics, graph metadata, and node details
-- Workspace file picker and graph search from the top bar
-- Canvas controls for zoom, focus-selection, and fit-graph actions
-- Export menu in the top bar with:
-  - `JSON export`: saves graph data, active file info, analysis metadata, and current UI state
-  - `JPG snapshot`: saves a JPEG image of the current graph canvas
+- Render `file`, `function`, `method`, `class`, `interface`, `type`, `enum`, and `external` nodes
+- Render `calls`, `constructs`, `references`, `updates`, and `dataflow` edges
+- Open CodeGraph either in the sidebar or in a separate editor panel
+- Switch host mode directly from Inspector settings:
+  - `Sidebar Left`
+  - `Sidebar Right`
+  - `Editor Panel`
+- Move the Inspector between:
+  - `Auto`
+  - `Left`
+  - `Right`
+  - `Bottom`
+- Search nodes, files, and symbols from the top bar
+- Filter visible graph content by chip:
+  - `All`
+  - `Functions`
+  - `Classes`
+  - `Files`
+  - `Interfaces`
+  - `Variables`
+- Group results as `folder -> file -> symbol`
+- Collapse and expand folder groups and file groups
+- Keep the active file and active folder open by default while other groups start collapsed
+- Support root selection flows such as "use selection as root"
+- Highlight focused parameter-flow edges and surface them in the Inspector
+- Expand external nodes into the current graph
+- Follow VS Code debugger state and map the paused frame onto the graph
+- Export the current graph as structured JSON or a JPG snapshot
 
 ---
 
-## Interaction Model
+## Opening CodeGraph
 
-- `Single click` on a canvas node selects it and zooms the canvas toward that node
-- `Double click` on a canvas node opens the corresponding source location
-- Inspector actions continue to open code locations directly
-- External nodes can still be expanded into the current graph
+You can open CodeGraph in two ways.
+
+### Commands
+
+- `CodeGraph: Open Editor Panel`
+- `CodeGraph: Focus Sidebar View`
+
+Internal command ids:
+
+- `codegraph.open`
+- `codegraph.openSidebar`
+
+### Activity Bar
+
+The extension contributes a `CodeGraph` activity bar icon. Opening it focuses the sidebar-hosted webview view.
+
+---
+
+## Graph Model
+
+The analyzer currently emits a graph with:
+
+```ts
+type GraphPayload = {
+  nodes: Array<{
+    id: string;
+    kind: "file" | "function" | "method" | "class" | "interface" | "external";
+    name: string;
+    file: string;
+    parentId?: string;
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    signature?: string;
+    sig?: {
+      params: Array<{ name: string; type: string; optional?: boolean }>;
+      returnType?: string;
+    };
+    subkind?: "interface" | "type" | "enum";
+  }>;
+  edges: Array<{
+    id: string;
+    kind: "calls" | "constructs" | "dataflow" | "references" | "updates";
+    source: string;
+    target: string;
+    label?: string;
+  }>;
+};
+```
+
+Notes:
+
+- folder groups are currently a UI/layout layer, not analyzer graph nodes
+- folder grouping is used to organize file groups in depth-expanded graphs
+
+---
+
+## Canvas Behavior
+
+### Node and Group Interaction
+
+- `Single click` on a node selects it
+- `Double click` on a node opens the matching source location
+- child symbol rows inside compound nodes support selection and navigation
+- folder groups and file groups can be collapsed and expanded
+- when graph re-layout happens after opening a folder or file, the camera follows the interacted target
+
+### Top Bar
+
+The top bar supports:
+
+- active file selection
+- depth selection
+- graph search
+- refresh/re-analyze actions
+- layout/graph utilities
+- export actions
+
+### Parameter Flow
+
+- parameter/data-flow edges are rendered in a dedicated lane
+- focused parameter flow is highlighted on the canvas
+- parameter flow details are shown in the Inspector
+- parameter flow overlays are layered above normal edges, while Inspector/canvas overlay panels remain above them
+
+---
+
+## Inspector
+
+The Inspector is now both a detail pane and a settings surface.
+
+### Inspector Content Sections
+
+- `Active File Snapshot`
+- `Root`
+- `Runtime Frame`
+- `Selected Node`
+- `Selection`
+- `Param Flow`
+- `Analysis`
+
+### Inspector Settings
+
+Clicking the settings icon switches the Inspector itself into settings mode.
+
+Inside settings mode you can:
+
+- switch display mode between sidebar-left, sidebar-right, and editor-panel
+- change Inspector placement between auto, left, right, and bottom
+- show or hide sections
+- reorder sections
+- drag sections to reorder them
+
+Section layout preferences are persisted locally in the webview.
+
+---
 
 ## Trace Mode
 
-- Trace playback steps through graph construction events one step at a time
-- Newly introduced trace nodes are visually focused in the canvas
-- Parameter-flow trace steps highlight the edge and surface the active flow in the inspector panel
+Trace mode helps explain how CodeGraph built the current graph.
 
-## Debug Mode
+- trace playback steps through graph construction events
+- newly introduced trace nodes are visually focused
+- parameter-flow trace steps highlight the active flow edge
+- the Inspector surfaces the currently focused trace flow
 
-- Debug mode listens to VS Code debug sessions and reads the active paused stack frame
-- The current frame `file/line` is mapped onto the existing graph and the matched node is highlighted
-- Stepping with `Step Over` / `Step Into` updates the graph focus as the active frame changes
-- The inspector surfaces the current runtime frame and a compact preview of key variables
-
-### Recommended flow
-
-1. open the target file
-2. click `Generate` to build the graph
-3. start a normal VS Code debug session with breakpoints
-4. when execution pauses, let CodeGraph follow the active frame
-5. continue stepping to watch the graph move across functions and methods
-
-### Current MVP scope
-
-- built around file-backed TypeScript/JavaScript debug flows
-- best experience when the graph has already been generated for the active file
-- focused on paused-frame tracking rather than full execution tracing while the program is running
-
-## Trace Mode vs Debug Mode
-
-| Mode | What it shows | Source of truth | Best for |
-| --- | --- | --- | --- |
-| `Trace Mode` | how the graph is constructed step by step | static analyzer trace events | understanding graph generation order and data-flow construction |
-| `Debug Mode` | where the paused program is currently executing | VS Code debug adapter + active stack frame | following real runtime execution while stepping through code |
-
-In short:
-
-- `Trace Mode` is offline and analyzer-driven
-- `Debug Mode` is live and debugger-driven
-- `Trace Mode` explains how CodeGraph built the graph
-- `Debug Mode` explains where your program is stopped right now
+Use Trace mode when you want to understand graph construction rather than runtime execution.
 
 ---
 
-## Export Formats
+## Runtime Debug Mode
 
-### JSON export
+Debug mode listens to VS Code debug sessions and maps the paused runtime frame onto the existing graph.
 
-The JSON export is saved with a schema like:
+- reads the current paused stack frame from VS Code
+- matches `file/line` data back to graph nodes
+- highlights the runtime-active node
+- shows frame information in the Inspector
+- shows a compact set of important variables
+- supports stepping through code while the graph focus updates
+
+Recommended flow:
+
+1. Open the target file.
+2. Generate the graph.
+3. Start a normal VS Code debug session with breakpoints.
+4. Let execution pause.
+5. Step through code and watch CodeGraph follow the runtime frame.
+
+### Trace Mode vs Debug Mode
+
+| Mode | What it shows | Source of truth | Best for |
+| --- | --- | --- | --- |
+| `Trace Mode` | how the graph was constructed | analyzer trace events | understanding graph generation |
+| `Debug Mode` | where execution is currently paused | VS Code debugger state | following real runtime execution |
+
+---
+
+## Export
+
+### JSON Export
+
+The JSON export saves:
+
+- graph nodes and edges
+- active file information
+- analysis metadata
+- UI state such as filter, search query, selection, root, and Inspector layout
+
+Example schema:
 
 ```json
 {
@@ -157,17 +288,49 @@ The JSON export is saved with a schema like:
 }
 ```
 
-Use this when you want structured graph data for inspection, debugging, or future import/export workflows.
+### JPG Snapshot
 
-### JPG snapshot
-
-The JPG export captures the current graph canvas as an image. This is useful for sharing the current graph view in docs, chat, or issues.
+The JPG export captures the current graph canvas as an image.
 
 Notes:
 
-- the export currently captures the graph canvas as rendered in the webview
-- overlay controls such as zoom buttons and notices are filtered out from the snapshot
-- this is a snapshot export, not a structured graph format
+- it is a rendered snapshot, not a structured format
+- overlay controls and utility chrome are filtered out where possible
+- it is useful for issues, docs, chat, and quick sharing
+
+---
+
+## Message Protocol
+
+### Webview -> Extension
+
+| Type | Description |
+| --- | --- |
+| `requestActiveFile` | Request current active editor info |
+| `requestWorkspaceFiles` | Request workspace root and file list |
+| `requestSelection` | Request current editor selection |
+| `requestHostState` | Request current host kind and sidebar location |
+| `analyzeActiveFile` | Analyze the active file |
+| `analyzeWorkspace` | Analyze from workspace context |
+| `selectWorkspaceFile` | Open a file from the workspace picker |
+| `expandNode` | Analyze and merge graph data for an external file |
+| `setGraphDepth` | Update graph depth |
+| `openLocation` | Reveal a source location in the editor |
+| `saveExportFile` | Save a JSON or JPG export through VS Code |
+| `switchHost` | Switch between sidebar and editor panel, optionally changing sidebar side |
+
+### Extension -> Webview
+
+| Type | Description |
+| --- | --- |
+| `activeFile` | Active editor payload |
+| `workspaceFiles` | Workspace root and file list |
+| `selection` | Current selection payload |
+| `analysisResult` | Graph, diagnostics, trace, and metadata |
+| `runtimeDebug` | Debug session, frame, and variable snapshot |
+| `hostState` | Current host kind and sidebar location |
+| `uiNotice` | Toast/canvas/inspector notice |
+| `flowExportResult` | Result of JSON/JPG export save |
 
 ---
 
@@ -184,37 +347,8 @@ flowchart LR
   EH -->|read| AE["Active Editor / Workspace"]
   EH -->|analyze| AST["Analyzer"]
   AST --> EH
-  EH -->|results / notices| WV
+  EH -->|results / notices / host state| WV
 ```
-
----
-
-## Message Protocol
-
-### Webview -> Extension
-
-| Type | Description |
-| --- | --- |
-| `requestActiveFile` | Request current active editor info |
-| `requestWorkspaceFiles` | Request workspace file list |
-| `requestSelection` | Request current editor selection |
-| `analyzeActiveFile` | Analyze active file |
-| `selectWorkspaceFile` | Open a file from the workspace picker |
-| `expandNode` | Analyze and merge graph data for an external file |
-| `openLocation` | Reveal a code location in the editor |
-| `saveExportFile` | Save a JSON or JPG export via VS Code save dialog |
-
-### Extension -> Webview
-
-| Type | Description |
-| --- | --- |
-| `activeFile` | Active editor payload |
-| `workspaceFiles` | Workspace root and file list |
-| `selection` | Current selection payload |
-| `analysisResult` | Graph, diagnostics, trace, and metadata |
-| `runtimeDebug` | Current runtime debug session/frame/variable snapshot |
-| `uiNotice` | Toast/canvas/inspector notice |
-| `flowExportResult` | Result of JSON/JPG export save |
 
 ---
 
@@ -237,29 +371,18 @@ npm install
 
 ## Development
 
-### Webview UI
-
-```bash
-cd webview-ui
-npm run dev
-```
-
-### Build webview
+### Run the webview UI build
 
 ```bash
 cd webview-ui
 npm run build
 ```
 
-### Run extension
+### Run the extension
 
 Open the repo in VS Code and press `F5` to launch an Extension Development Host.
 
----
-
-## Build
-
-Build everything from the repo root:
+### Build everything
 
 ```bash
 npm run build:all
@@ -267,8 +390,8 @@ npm run build:all
 
 This runs:
 
-1. webview build
-2. copy webview output into `media/webview`
+1. the webview build
+2. webview asset copy into `media/webview`
 3. extension TypeScript compile
 
 ---
@@ -277,56 +400,30 @@ This runs:
 
 ```text
 .
-├─ src/                # VS Code extension source
-├─ webview-ui/         # React + Vite webview UI
-├─ media/webview/      # generated webview build output
-├─ scripts/            # helper scripts
-├─ assets/             # logos / demo images
-├─ package.json
-└─ README.md
+|-- src/                # VS Code extension source
+|-- webview-ui/         # React + Vite webview UI
+|-- media/webview/      # generated webview build output
+|-- scripts/            # helper scripts
+|-- assets/             # logos and demo assets
+|-- package.json
+`-- README.md
 ```
 
 ---
 
-## Current Graph Model
+## Current Notes
 
-The analyzer currently emits a graph with:
-
-```ts
-type GraphPayload = {
-  nodes: Array<{
-    id: string;
-    kind: "file" | "function" | "method" | "class" | "interface" | "external";
-    name: string;
-    file: string;
-    parentId?: string;
-    range: {
-      start: { line: number; character: number };
-      end: { line: number; character: number };
-    };
-    signature?: string;
-    sig?: {
-      params: Array<{ name: string; type: string; optional?: boolean }>;
-      returnType?: string;
-    };
-    subkind?: "interface" | "type" | "enum";
-  }>;
-  edges: Array<{
-    id: string;
-    kind: "calls" | "constructs" | "dataflow" | "references" | "updates";
-    source: string;
-    target: string;
-    label?: string;
-  }>;
-};
-```
+- best supported target is TypeScript/JavaScript code inside a normal VS Code workspace
+- folder grouping is visual organization, not part of the analyzer graph schema
+- sidebar-right support works by switching the VS Code sidebar location
+- sidebar and editor panel can both be used, but they are separate webview hosts
 
 ---
 
 ## Roadmap
 
-- [ ] export full graph bounds as an image, not only the current rendered canvas region
+- [ ] export full graph bounds instead of only the visible rendered canvas region
 - [ ] add import support for previously exported JSON graph files
 - [ ] improve analyzer precision for call graph and external references
 - [ ] incremental analysis for larger workspaces
-- [ ] optional PNG/SVG export presets
+- [ ] add more export presets such as PNG or SVG
