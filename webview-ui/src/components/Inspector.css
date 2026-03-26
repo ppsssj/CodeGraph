@@ -673,3 +673,167 @@
   color: color-mix(in srgb, var(--accent) 68%, var(--fg));
   font-size: 10px;
 }
+
+.inspectorSettingsView {
+  display: grid;
+  gap: 14px;
+}
+
+.inspectorSettingsCard {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface1) 82%, transparent);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.inspectorSettingsCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inspectorSettingsCardHeader h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--fg);
+}
+
+.inspectorSettingsCardHeader p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.inspectorSettingsOptions {
+  display: grid;
+  gap: 8px;
+}
+
+.inspectorSectionList {
+  display: grid;
+  gap: 10px;
+}
+
+.inspectorSectionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface2) 72%, transparent);
+}
+
+.inspectorSectionRow.isHidden {
+  opacity: 0.76;
+}
+
+.inspectorSectionRow.isDragging {
+  opacity: 0.5;
+}
+
+.inspectorSectionRow.isDropTarget {
+  border-color: var(--outlineStrong);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface2));
+}
+
+.inspectorSectionMeta {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px;
+  align-items: center;
+}
+
+.inspectorSectionDragHandle {
+  grid-row: 1 / span 2;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--outlineSubtle);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: grab;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.inspectorSectionDragHandle:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: var(--surfaceActive);
+  color: var(--fg);
+}
+
+.inspectorSectionDragHandle:active {
+  cursor: grabbing;
+}
+
+.inspectorSectionMeta strong {
+  font-size: 12px;
+  color: var(--fg);
+  min-width: 0;
+}
+
+.inspectorSectionMeta small {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.inspectorSectionControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspectorToggleChip {
+  min-width: 74px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--outlineSubtle);
+  background: var(--surface2);
+  color: var(--textSoft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.inspectorToggleChip:hover {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: var(--surfaceActive);
+  color: var(--fg);
+}
+
+.inspectorToggleChip.isActive {
+  border-color: var(--outlineStrong);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface1));
+  color: color-mix(in srgb, var(--accent) 68%, var(--fg));
+}
+
+.inspectorEmptyState {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  align-content: center;
+  text-align: center;
+}

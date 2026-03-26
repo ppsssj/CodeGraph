@@ -2098,6 +2098,7 @@ export default function App() {
         <CanvasPane
           graph={graph}
           hasData={hasGraphData}
+          activeFilePath={activeFilePath}
           activeFilter={activeChip}
           searchQuery={searchQuery}
           rootNodeId={rootNodeId}

@@ -3,9 +3,11 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  GripVertical,
+  InspectionPanel,
   Settings,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import type {
   CodeDiagnostic,
@@ -92,10 +94,34 @@ type Props = {
 };
 
 const SECTION_STORAGE_KEY = "cg.inspector.sections";
+const SECTION_LAYOUT_STORAGE_KEY = "cg.inspector.section-layout";
 const DEFAULT_SECTION_STATE: Record<SectionKey, boolean> = {
   snapshot: true,
   root: true,
   runtime: false,
+  selected: true,
+  selection: true,
+  flow: true,
+  analysis: true,
+};
+const SECTION_DEFS: Array<{
+  key: SectionKey;
+  title: string;
+  summary: string;
+}> = [
+  { key: "snapshot", title: "Active File Snapshot", summary: "Current file preview and refresh." },
+  { key: "root", title: "Root", summary: "Current root node and root scope." },
+  { key: "runtime", title: "Runtime Frame", summary: "Debugger frame and key variables." },
+  { key: "selected", title: "Selected Node", summary: "Selected graph node details." },
+  { key: "selection", title: "Selection", summary: "Current editor selection range and text." },
+  { key: "flow", title: "Param Flow", summary: "Focused parameter flow and flow list." },
+  { key: "analysis", title: "Analysis", summary: "Analyzer findings, diagnostics, and metrics." },
+];
+const DEFAULT_SECTION_ORDER = SECTION_DEFS.map((section) => section.key);
+const DEFAULT_SECTION_VISIBILITY: Record<SectionKey, boolean> = {
+  snapshot: true,
+  root: true,
+  runtime: true,
   selected: true,
   selection: true,
   flow: true,
@@ -266,6 +292,43 @@ function loadSectionState() {
   }
 }
 
+function isSectionKey(value: string): value is SectionKey {
+  return DEFAULT_SECTION_ORDER.includes(value as SectionKey);
+}
+
+function loadSectionLayout() {
+  try {
+    const raw = localStorage.getItem(SECTION_LAYOUT_STORAGE_KEY);
+    if (!raw) {
+      return {
+        order: DEFAULT_SECTION_ORDER,
+        visible: DEFAULT_SECTION_VISIBILITY,
+      };
+    }
+
+    const parsed = JSON.parse(raw) as {
+      order?: string[];
+      visible?: Partial<Record<SectionKey, boolean>>;
+    };
+
+    const persistedOrder = (parsed.order ?? []).filter(isSectionKey);
+    const order = [
+      ...persistedOrder,
+      ...DEFAULT_SECTION_ORDER.filter((key) => !persistedOrder.includes(key)),
+    ];
+
+    return {
+      order,
+      visible: { ...DEFAULT_SECTION_VISIBILITY, ...(parsed.visible ?? {}) },
+    };
+  } catch {
+    return {
+      order: DEFAULT_SECTION_ORDER,
+      visible: DEFAULT_SECTION_VISIBILITY,
+    };
+  }
+}
+
 function PanelChevron({
   collapsed,
   collapseDirection,
@@ -377,13 +440,20 @@ export function Inspector({
   onPlacementChange,
   onToggleCollapsed,
 }: Props) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsMode, setSettingsMode] = useState(false);
   const [sectionOpen, setSectionOpen] = useState<Record<SectionKey, boolean>>(
     () => loadSectionState(),
   );
+  const [sectionOrder, setSectionOrder] = useState<SectionKey[]>(
+    () => loadSectionLayout().order,
+  );
+  const [sectionVisible, setSectionVisible] = useState<Record<SectionKey, boolean>>(
+    () => loadSectionLayout().visible,
+  );
+  const [draggedSectionKey, setDraggedSectionKey] = useState<SectionKey | null>(null);
+  const [dropSectionKey, setDropSectionKey] = useState<SectionKey | null>(null);
   const [hoveredRuntimeVarKey, setHoveredRuntimeVarKey] = useState<string | null>(null);
   const [pinnedRuntimeVarKeys, setPinnedRuntimeVarKeys] = useState<string[]>([]);
-  const settingsRef = useRef<HTMLDivElement | null>(null);
   const runtimeVarHoverTimerRef = useRef<number | null>(null);
   const previousAutoExpandFingerprintsRef = useRef<Partial<Record<SectionKey, string>> | null>(
     null,
@@ -500,33 +570,26 @@ export function Inspector({
   });
 
   useEffect(() => {
-    if (!settingsOpen) return;
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (!settingsRef.current?.contains(event.target as Node)) {
-        setSettingsOpen(false);
-      }
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSettingsOpen(false);
-    };
-
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [settingsOpen]);
-
-  useEffect(() => {
     try {
       localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(sectionOpen));
     } catch {
       // ignore
     }
   }, [sectionOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        SECTION_LAYOUT_STORAGE_KEY,
+        JSON.stringify({
+          order: sectionOrder,
+          visible: sectionVisible,
+        }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [sectionOrder, sectionVisible]);
 
   useEffect(() => {
     setSectionOpen((prev) => {
@@ -602,6 +665,38 @@ export function Inspector({
   const toggleSection = (key: SectionKey) => {
     setSectionOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+  const toggleSectionVisibility = (key: SectionKey) => {
+    setSectionVisible((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  const moveSection = (key: SectionKey, direction: "up" | "down") => {
+    setSectionOrder((prev) => {
+      const currentIndex = prev.indexOf(key);
+      if (currentIndex < 0) return prev;
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[currentIndex], next[targetIndex]] = [next[targetIndex], next[currentIndex]];
+      return next;
+    });
+  };
+  const moveSectionToTarget = (sourceKey: SectionKey, targetKey: SectionKey) => {
+    if (sourceKey === targetKey) {
+      return;
+    }
+
+    setSectionOrder((prev) => {
+      const sourceIndex = prev.indexOf(sourceKey);
+      const targetIndex = prev.indexOf(targetKey);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return prev;
+      }
+
+      const next = [...prev];
+      const [source] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, source);
+      return next;
+    });
+  };
   const scheduleRuntimeVarHover = (variableKey: string) => {
     if (runtimeVarHoverTimerRef.current !== null) {
       window.clearTimeout(runtimeVarHoverTimerRef.current);
@@ -665,6 +760,489 @@ export function Inspector({
       : width
         ? { width }
         : undefined;
+  const hostModeOptions = [
+    ["sidebar-left", "Sidebar Left", "Dock CodeGraph in the left sidebar"],
+    ["sidebar-right", "Sidebar Right", "Dock CodeGraph in the right sidebar"],
+    ["panel", "Editor Panel", "Open CodeGraph as a separate editor tab"],
+  ] as const;
+  const placementOptions = [
+    ["auto", "Auto", "Follow window width"],
+    ["left", "Left", "Keep inspector on the left"],
+    ["right", "Right", "Keep inspector on the side"],
+    ["bottom", "Bottom", "Keep inspector under the canvas"],
+  ] as const;
+  const sectionNodes: Record<SectionKey, ReactNode> = {
+    snapshot: (
+      <ActiveFileSnapshot
+        className="panel--snapshot"
+        collapsedLabel="Active File"
+        fileName={activeFile?.fileName}
+        languageId={activeFile?.languageId}
+        text={activeFile?.text}
+        onRefresh={onRefreshActive}
+        collapsed={!sectionOpen.snapshot}
+        onToggleCollapsed={() => toggleSection("snapshot")}
+        collapseDirection={collapseDirection}
+      />
+    ),
+    root: (
+      <InspectorPanel
+        className="panel--root"
+        title="ROOT"
+        collapsedLabel="Root"
+        open={sectionOpen.root}
+        onToggle={() => toggleSection("root")}
+        collapseDirection={collapseDirection}
+        actions={
+          rootNode && onClearRoot ? (
+            <button className="smallBtn" type="button" onClick={onClearRoot}>
+              Clear Root
+            </button>
+          ) : null
+        }
+      >
+        {!rootNode ? (
+          <div className="mutedText">No root selected.</div>
+        ) : (
+          <div className="kvList">
+            <div className="kvRow">
+              <div className="kvKey mono">kind</div>
+              <div className="kvVal mono">{rootNode.kind}</div>
+            </div>
+            <div className="kvRow">
+              <div className="kvKey mono">name</div>
+              <div className="kvVal mono">{rootNode.name}</div>
+            </div>
+            <div className="kvRow">
+              <div className="kvKey mono">file</div>
+              <div className="kvVal mono">{shortFile(rootNode.file)}</div>
+            </div>
+            <div className="kvRow">
+              <div className="kvKey mono">range</div>
+              <div className="kvVal mono">{fmtRange(rootNode)}</div>
+            </div>
+          </div>
+        )}
+      </InspectorPanel>
+    ),
+    runtime: (
+      <InspectorPanel
+        className="panel--runtime"
+        title="RUNTIME FRAME"
+        collapsedLabel="Runtime"
+        open={sectionOpen.runtime}
+        onToggle={() => toggleSection("runtime")}
+        collapseDirection={collapseDirection}
+      >
+        {!runtimeDebug || runtimeDebug.state === "inactive" ? (
+          <div className="mutedText">No active debug session.</div>
+        ) : runtimeDebug.state === "running" ? (
+          <div className="kvList">
+            <div className="kvRow">
+              <div className="kvKey mono">status</div>
+              <div className="kvVal mono">
+                Running{runtimeDebug.session?.name ? ` in ${runtimeDebug.session.name}` : ""}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid rgba(56, 189, 248, 0.28)",
+                background: "rgba(56, 189, 248, 0.06)",
+                display: "grid",
+                gap: 8,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <div className="mono" style={{ fontSize: 11, opacity: 0.75 }}>
+                  {runtimeDebug.reason ?? "paused"}
+                </div>
+                {runtimeActiveNode ? (
+                  <button
+                    className="smallBtn"
+                    type="button"
+                    onClick={() => onActivateGraphNode(runtimeActiveNode.id)}
+                    title={runtimeActiveNode.file}
+                  >
+                    {runtimeActiveNode.name}
+                  </button>
+                ) : null}
+              </div>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 800 }}>
+                {runtimeDebug.frame?.name ?? "(unavailable frame)"}
+              </div>
+              <div className="mono" style={{ fontSize: 12, opacity: 0.8 }}>
+                {fmtRuntimeLocation(runtimeDebug.frame)}
+              </div>
+            </div>
+
+            <div>
+              <div className="mono" style={{ fontSize: 11, opacity: 0.75, marginBottom: 8 }}>
+                Key Variables
+              </div>
+              {runtimeDebug.variables && runtimeDebug.variables.length > 0 ? (
+                <div className="kvList">
+                  {runtimeDebug.variables.map((variable) => {
+                    const variableKey = `${variable.scope}:${variable.name}`;
+                    const expanded =
+                      pinnedRuntimeVarKeys.includes(variableKey) ||
+                      hoveredRuntimeVarKey === variableKey;
+
+                    return (
+                      <div
+                        className={[
+                          "runtimeVarCard",
+                          expanded ? "isExpanded" : "",
+                          pinnedRuntimeVarKeys.includes(variableKey) ? "isPinned" : "",
+                        ].join(" ").trim()}
+                        key={variableKey}
+                        role="button"
+                        tabIndex={0}
+                        onMouseEnter={() => scheduleRuntimeVarHover(variableKey)}
+                        onMouseLeave={() => clearRuntimeVarHover(variableKey)}
+                        onClick={() => togglePinnedRuntimeVar(variableKey)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          togglePinnedRuntimeVar(variableKey);
+                        }}
+                      >
+                        <div className="runtimeVarCardTop">
+                          <div className="runtimeVarCardName mono" title={variable.scope}>
+                            {fmtRuntimeScope(variable.scope)} {variable.name}
+                          </div>
+                          <div className="runtimeVarCardValue mono" title={variable.value}>
+                            {expanded ? variable.value : compactRuntimeValue(variable.value)}
+                          </div>
+                        </div>
+
+                        {expanded ? (
+                          <div className="runtimeVarCardDetail">
+                            {variable.type ? (
+                              <div className="runtimeVarCardMeta mono">{variable.type}</div>
+                            ) : null}
+                            {variable.evaluateName ? (
+                              <div className="runtimeVarCardMeta mono">
+                                {variable.evaluateName}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="mutedText">No useful locals or arguments yet.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </InspectorPanel>
+    ),
+    selected: (
+      <InspectorPanel
+        className="panel--selected"
+        title="SELECTED NODE"
+        collapsedLabel="Selected"
+        open={sectionOpen.selected}
+        onToggle={() => toggleSection("selected")}
+        collapseDirection={collapseDirection}
+      >
+        {!selectedNode ? (
+          <div className="mutedText">
+            No node selected. Click a node in the graph.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="kvList">
+              <div className="kvRow">
+                <div className="kvKey mono">kind</div>
+                <div className="kvVal mono">{selectedNode.kind}</div>
+              </div>
+              <div className="kvRow">
+                <div className="kvKey mono">name</div>
+                <div className="kvVal mono">{selectedNode.name}</div>
+              </div>
+              <div className="kvRow">
+                <div className="kvKey mono">file</div>
+                <div className="kvVal mono">{shortFile(selectedNode.file)}</div>
+              </div>
+              <div className="kvRow">
+                <div className="kvKey mono">range</div>
+                <div className="kvVal mono">{fmtRange(selectedNode)}</div>
+              </div>
+              <div className="kvRow">
+                <div className="kvKey mono">signature</div>
+                <div className="kvVal mono">
+                  {fmtSig(selectedNode as GraphNodeWithSig)}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div
+                className="mono"
+                style={{ fontSize: 11, opacity: 0.75, marginBottom: 8 }}
+              >
+                Analyzer Context
+              </div>
+              <div className="kvList">
+                <div className="kvRow">
+                  <div className="kvKey mono">mode</div>
+                  <div className="kvVal mono">
+                    {fmtAnalyzerMode(analysis?.meta?.mode)}
+                  </div>
+                </div>
+                <div className="kvRow">
+                  <div className="kvKey mono">language</div>
+                  <div className="kvVal mono">{analysis?.languageId ?? "(unknown)"}</div>
+                </div>
+                {analysis?.meta?.mode === "workspace" ? (
+                  <>
+                    <div className="kvRow">
+                      <div className="kvKey mono">root files</div>
+                      <div className="kvVal mono">{analysis.meta.rootFiles}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey mono">tsconfig</div>
+                      <div className="kvVal mono">
+                        {analysis.meta.usedTsconfig ? "enabled" : "fallback"}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <div
+                className="mono"
+                style={{ fontSize: 11, opacity: 0.75, marginBottom: 8 }}
+              >
+                How This Node Is Connected
+              </div>
+              <div className="mutedText" style={{ marginBottom: 10 }}>
+                These cards show who calls this node, what values flow into it, and what it
+                reads or updates.
+              </div>
+              {selectedNodeEvidence.length === 0 ? (
+                <div className="mutedText">
+                  No graph connections are attached to this node yet.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {selectedNodeEvidence.map((edge) => (
+                    <div
+                      key={edge.id}
+                      style={{
+                        padding: 10,
+                        borderRadius: 10,
+                        border: "1px solid var(--border)",
+                        background: "rgba(255,255,255,0.03)",
+                        display: "grid",
+                        gap: 6,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div className="mono" style={{ fontSize: 11, opacity: 0.8 }}>
+                          {getEvidenceHeading(edge.kind, edge.direction)}
+                        </div>
+                        <button
+                          className="smallBtn"
+                          type="button"
+                          onClick={() => onSelectGraphNode(edge.otherId)}
+                          title={edge.otherFile ?? edge.otherName}
+                        >
+                          {edge.otherName}
+                        </button>
+                      </div>
+                      <div className="mutedText">{edge.reason}</div>
+                      {getEvidenceLabelText(edge.kind, edge.label) ? (
+                        <div className="mono" style={{ fontSize: 11, opacity: 0.72 }}>
+                          {getEvidenceLabelText(edge.kind, edge.label)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </InspectorPanel>
+    ),
+    selection: (
+      <InspectorPanel
+        className="panel--selection"
+        title="SELECTION"
+        collapsedLabel="Selection"
+        open={sectionOpen.selection}
+        onToggle={() => toggleSection("selection")}
+        collapseDirection={collapseDirection}
+      >
+        <div className="mono" style={{ fontSize: 11, opacity: 0.85 }}>
+          {selection
+            ? `${selection.start.line + 1}:${selection.start.character + 1} -> ${
+                selection.end.line + 1
+              }:${selection.end.character + 1}`
+            : "No selection"}
+        </div>
+
+        <pre
+          className="mono"
+          style={{
+            margin: 0,
+            maxHeight: 140,
+            overflow: "auto",
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid var(--border)",
+            background: "rgba(255,255,255,0.03)",
+            fontSize: 12,
+            lineHeight: 1.45,
+            whiteSpace: "pre",
+          }}
+        >
+          {selection?.selectionText || ""}
+        </pre>
+      </InspectorPanel>
+    ),
+    flow: (
+      <InspectorPanel
+        className="panel--flow"
+        title="PARAM FLOW"
+        collapsedLabel="Flow"
+        open={sectionOpen.flow}
+        onToggle={() => toggleSection("flow")}
+        collapseDirection={collapseDirection}
+      >
+        {activeFlowCard ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            <div className="inspectorFlowActive">
+              <div className="inspectorFlowActiveTop">
+                <span className="inspectorFlowActiveTitle">
+                  {activeFlowCard.origin === "trace" ? "Current Trace Flow" : "Focused Parameter Flow"}
+                </span>
+                <span className="inspectorFlowActiveBadge">
+                  {activeFlowCard.origin === "trace" ? "TRACE" : "FOCUS"}
+                </span>
+              </div>
+              <div className="mono inspectorFlowActivePath">
+                {activeFlowCard.from}
+                {" -> "}
+                {activeFlowCard.to}
+              </div>
+              <div className="mutedText mono" title={activeFlowCard.label}>
+                {activeFlowCard.label}
+              </div>
+            </div>
+
+            <div className="kvList">
+              <div className="kvRow">
+                <div className="kvKey mono">edge type</div>
+                <div className="kvVal mono">{activeFlowEdge?.kind ?? "dataflow"}</div>
+              </div>
+              <div className="kvRow">
+                <div className="kvKey mono">meaning</div>
+                <div className="kvVal">
+                  {activeFlowReason ?? "Analyzer recorded this as the currently focused flow edge."}
+                </div>
+              </div>
+              {activeFlowCard.label ? (
+                <div className="kvRow">
+                  <div className="kvKey mono">mapping</div>
+                  <div className="kvVal mono">{activeFlowCard.label}</div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {visibleParamFlows.length === 0 ? (
+          <div className="mutedText">
+            {selectedNode
+              ? "No parameter flow for selected node."
+              : "No parameter flow detected."}
+          </div>
+        ) : (
+          <div className="kvList">
+            {visibleParamFlows.map((f) => (
+              <div
+                className={[
+                  "kvRow",
+                  "inspectorFlowRow",
+                  activeFlowCard?.id === f.id ? "inspectorFlowRow--active" : "",
+                ].join(" ")}
+                key={f.id}
+                style={{ display: "block" }}
+                onClick={() =>
+                  onFocusParamFlow({
+                    edgeId: f.id,
+                    sourceId: f.sourceId,
+                    targetId: f.targetId,
+                  })
+                }
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  onFocusParamFlow({
+                    edgeId: f.id,
+                    sourceId: f.sourceId,
+                    targetId: f.targetId,
+                  });
+                }}
+              >
+                <div className="mono" style={{ fontSize: 12 }}>
+                  {f.from}
+                  {" -> "}
+                  {f.to}
+                </div>
+                <div className="mutedText mono" title={f.label}>
+                  {f.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </InspectorPanel>
+    ),
+    analysis: (
+      <AnalysisPanel
+        analysis={analysis}
+        graph={graph}
+        className="panel--analysis"
+        collapsedLabel="Analysis"
+        onOpenDiagnostic={onOpenDiagnostic}
+        onSelectGraphNode={onSelectGraphNode}
+        onActivateGraphNode={onActivateGraphNode}
+        collapsed={!sectionOpen.analysis}
+        onToggleCollapsed={() => toggleSection("analysis")}
+        collapseDirection={collapseDirection}
+      />
+    ),
+  };
+  const visibleOrderedSections = sectionOrder.filter((key) => sectionVisible[key]);
 
   if (collapsed) {
     return (
@@ -701,8 +1279,8 @@ export function Inspector({
     >
       <div className="inspectorHeader">
         <div>
-          <h1>Inspector</h1>
-          <p>COMPONENT ANALYSIS</p>
+          <h1>{settingsMode ? "Inspector Settings" : "Inspector"}</h1>
+          <p>{settingsMode ? "LAYOUT AND SECTIONS" : "COMPONENT ANALYSIS"}</p>
         </div>
 
         <div className="inspectorHeaderActions">
@@ -714,122 +1292,25 @@ export function Inspector({
           >
             {collapseIcon}
           </button>
-          <div className="inspectorSettingsWrap" ref={settingsRef}>
+          {settingsMode ? (
             <button
-              className={[
-                "iconBtn",
-                "subtle",
-                settingsOpen ? "iconBtn--active" : "",
-              ].join(" ")}
+              className="iconBtn subtle iconBtn--active"
+              type="button"
+              title="Back to Inspector"
+              onClick={() => setSettingsMode(false)}
+            >
+              <InspectionPanel className="icon" />
+            </button>
+          ) : (
+            <button
+              className="iconBtn subtle"
               type="button"
               title="Inspector Settings"
-              aria-haspopup="menu"
-              aria-expanded={settingsOpen}
-              onClick={() => setSettingsOpen((open) => !open)}
+              onClick={() => setSettingsMode(true)}
             >
               <Settings className="icon" />
             </button>
-
-            {settingsOpen ? (
-              <div className="inspectorMenu" role="menu" aria-label="Inspector Settings">
-                <div className="inspectorMenuHeader">
-                  <span>Display Mode</span>
-                  <span className="inspectorMenuHint">
-                    {hostMode === "sidebar"
-                      ? `Sidebar ${sidebarLocation === "right" ? "Right" : "Left"}`
-                      : "Editor Panel"}
-                  </span>
-                </div>
-
-                {[
-                  ["sidebar-left", "Sidebar Left", "Dock CodeGraph in the left sidebar"],
-                  ["sidebar-right", "Sidebar Right", "Dock CodeGraph in the right sidebar"],
-                  ["panel", "Editor Panel", "Open CodeGraph as a separate editor tab"],
-                ].map(([value, label, description]) => {
-                  const active =
-                    value === "panel"
-                      ? hostMode === "panel"
-                      : hostMode === "sidebar" &&
-                        sidebarLocation === (value === "sidebar-right" ? "right" : "left");
-                  return (
-                    <button
-                      key={value}
-                      className={[
-                        "inspectorMenuOption",
-                        active ? "isActive" : "",
-                      ].join(" ")}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      onClick={() => {
-                        if (value === "panel") {
-                          onHostModeChange("panel");
-                        } else {
-                          onHostModeChange(
-                            "sidebar",
-                            value === "sidebar-right" ? "right" : "left",
-                          );
-                        }
-                        setSettingsOpen(false);
-                      }}
-                    >
-                      <span className="inspectorMenuOptionText">
-                        <strong>{label}</strong>
-                        <small>{description}</small>
-                      </span>
-                      <span className="inspectorMenuCheck" aria-hidden="true">
-                        {active ? "ok" : ""}
-                      </span>
-                    </button>
-                  );
-                })}
-
-                <div className="inspectorMenuDivider" />
-
-                <div className="inspectorMenuHeader">
-                  <span>Inspector Position</span>
-                  <span className="inspectorMenuHint">
-                    {placement === "auto"
-                      ? `Auto (${effectivePlacement})`
-                      : placement}
-                  </span>
-                </div>
-
-                {[
-                  ["auto", "Auto", "Follow window width"],
-                  ["left", "Left", "Keep inspector on the left"],
-                  ["right", "Right", "Keep inspector on the side"],
-                  ["bottom", "Bottom", "Keep inspector under the canvas"],
-                ].map(([value, label, description]) => {
-                  const active = placement === value;
-                  return (
-                    <button
-                      key={value}
-                      className={[
-                        "inspectorMenuOption",
-                        active ? "isActive" : "",
-                      ].join(" ")}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={active}
-                      onClick={() => {
-                        onPlacementChange(value as InspectorPlacement);
-                        setSettingsOpen(false);
-                      }}
-                    >
-                      <span className="inspectorMenuOptionText">
-                        <strong>{label}</strong>
-                        <small>{description}</small>
-                      </span>
-                      <span className="inspectorMenuCheck" aria-hidden="true">
-                        {active ? "ok" : ""}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
+          )}
         </div>
       </div>
 
@@ -842,488 +1323,248 @@ export function Inspector({
         </div>
       ) : null}
 
-      <div className="inspectorActions">
-        <button className="smallBtn" type="button" onClick={onRefreshActive}>
-          Refresh Active
-        </button>
-        <button className="smallBtn" type="button" onClick={onResetGraph}>
-          Reset Graph
-        </button>
-        {selectedNode && selectedNode.kind === "external" ? (
-          <button
-            className="smallBtn"
-            type="button"
-            onClick={() => onExpandExternal(selectedNode.file)}
-            title={selectedNode.file}
-          >
-            Expand External
+      {!settingsMode ? (
+        <div className="inspectorActions">
+          <button className="smallBtn" type="button" onClick={onRefreshActive}>
+            Refresh Active
           </button>
-        ) : null}
-      </div>
+          <button className="smallBtn" type="button" onClick={onResetGraph}>
+            Reset Graph
+          </button>
+          {selectedNode && selectedNode.kind === "external" ? (
+            <button
+              className="smallBtn"
+              type="button"
+              onClick={() => onExpandExternal(selectedNode.file)}
+              title={selectedNode.file}
+            >
+              Expand External
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="inspectorBody">
         <div className="inspectorPad">
-          <ActiveFileSnapshot
-            className="panel--snapshot"
-            collapsedLabel="Active File"
-            fileName={activeFile?.fileName}
-            languageId={activeFile?.languageId}
-            text={activeFile?.text}
-            onRefresh={onRefreshActive}
-            collapsed={!sectionOpen.snapshot}
-            onToggleCollapsed={() => toggleSection("snapshot")}
-            collapseDirection={collapseDirection}
-          />
-
-          <InspectorPanel
-            className="panel--root"
-            title="ROOT"
-            collapsedLabel="Root"
-            open={sectionOpen.root}
-            onToggle={() => toggleSection("root")}
-            collapseDirection={collapseDirection}
-            actions={
-              rootNode && onClearRoot ? (
-                <button className="smallBtn" type="button" onClick={onClearRoot}>
-                  Clear Root
-                </button>
-              ) : null
-            }
-          >
-            {!rootNode ? (
-              <div className="mutedText">No root selected.</div>
-            ) : (
-              <div className="kvList">
-                <div className="kvRow">
-                  <div className="kvKey mono">kind</div>
-                  <div className="kvVal mono">{rootNode.kind}</div>
-                </div>
-                <div className="kvRow">
-                  <div className="kvKey mono">name</div>
-                  <div className="kvVal mono">{rootNode.name}</div>
-                </div>
-                <div className="kvRow">
-                  <div className="kvKey mono">file</div>
-                  <div className="kvVal mono">{shortFile(rootNode.file)}</div>
-                </div>
-                <div className="kvRow">
-                  <div className="kvKey mono">range</div>
-                  <div className="kvVal mono">{fmtRange(rootNode)}</div>
-                </div>
-              </div>
-            )}
-          </InspectorPanel>
-
-          <InspectorPanel
-            className="panel--runtime"
-            title="RUNTIME FRAME"
-            collapsedLabel="Runtime"
-            open={sectionOpen.runtime}
-            onToggle={() => toggleSection("runtime")}
-            collapseDirection={collapseDirection}
-          >
-            {!runtimeDebug || runtimeDebug.state === "inactive" ? (
-              <div className="mutedText">No active debug session.</div>
-            ) : runtimeDebug.state === "running" ? (
-              <div className="kvList">
-                <div className="kvRow">
-                  <div className="kvKey mono">status</div>
-                  <div className="kvVal mono">
-                    Running{runtimeDebug.session?.name ? ` in ${runtimeDebug.session.name}` : ""}
+          {settingsMode ? (
+            <div className="inspectorSettingsView">
+              <section className="inspectorSettingsCard">
+                <div className="inspectorSettingsCardHeader">
+                  <div>
+                    <h2>Display Mode</h2>
+                    <p>
+                      {hostMode === "sidebar"
+                        ? `Sidebar ${sidebarLocation === "right" ? "Right" : "Left"}`
+                        : "Editor Panel"}
+                    </p>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: 12 }}>
-                <div
-                  style={{
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid rgba(56, 189, 248, 0.28)",
-                    background: "rgba(56, 189, 248, 0.06)",
-                    display: "grid",
-                    gap: 8,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 10,
-                    }}
-                  >
-                    <div className="mono" style={{ fontSize: 11, opacity: 0.75 }}>
-                      {runtimeDebug.reason ?? "paused"}
-                    </div>
-                    {runtimeActiveNode ? (
+                <div className="inspectorSettingsOptions">
+                  {hostModeOptions.map(([value, label, description]) => {
+                    const active =
+                      value === "panel"
+                        ? hostMode === "panel"
+                        : hostMode === "sidebar" &&
+                          sidebarLocation ===
+                            (value === "sidebar-right" ? "right" : "left");
+
+                    return (
                       <button
-                        className="smallBtn"
+                        key={value}
+                        className={[
+                          "inspectorMenuOption",
+                          active ? "isActive" : "",
+                        ]
+                          .join(" ")
+                          .trim()}
                         type="button"
-                        onClick={() => onActivateGraphNode(runtimeActiveNode.id)}
-                        title={runtimeActiveNode.file}
+                        onClick={() => {
+                          if (value === "panel") {
+                            onHostModeChange("panel");
+                            return;
+                          }
+
+                          onHostModeChange(
+                            "sidebar",
+                            value === "sidebar-right" ? "right" : "left",
+                          );
+                        }}
                       >
-                        {runtimeActiveNode.name}
+                        <span className="inspectorMenuOptionText">
+                          <strong>{label}</strong>
+                          <small>{description}</small>
+                        </span>
+                        <span className="inspectorMenuCheck" aria-hidden="true">
+                          {active ? "ok" : ""}
+                        </span>
                       </button>
-                    ) : null}
-                  </div>
-                  <div className="mono" style={{ fontSize: 13, fontWeight: 800 }}>
-                    {runtimeDebug.frame?.name ?? "(unavailable frame)"}
-                  </div>
-                  <div className="mono" style={{ fontSize: 12, opacity: 0.8 }}>
-                    {fmtRuntimeLocation(runtimeDebug.frame)}
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="inspectorSettingsCard">
+                <div className="inspectorSettingsCardHeader">
+                  <div>
+                    <h2>Inspector Position</h2>
+                    <p>
+                      {placement === "auto"
+                        ? `Auto (${effectivePlacement})`
+                        : placement}
+                    </p>
                   </div>
                 </div>
+                <div className="inspectorSettingsOptions">
+                  {placementOptions.map(([value, label, description]) => {
+                    const active = placement === value;
 
-                <div>
-                  <div className="mono" style={{ fontSize: 11, opacity: 0.75, marginBottom: 8 }}>
-                    Key Variables
+                    return (
+                      <button
+                        key={value}
+                        className={[
+                          "inspectorMenuOption",
+                          active ? "isActive" : "",
+                        ]
+                          .join(" ")
+                          .trim()}
+                        type="button"
+                        onClick={() => onPlacementChange(value)}
+                      >
+                        <span className="inspectorMenuOptionText">
+                          <strong>{label}</strong>
+                          <small>{description}</small>
+                        </span>
+                        <span className="inspectorMenuCheck" aria-hidden="true">
+                          {active ? "ok" : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="inspectorSettingsCard">
+                <div className="inspectorSettingsCardHeader">
+                  <div>
+                    <h2>Inspector Sections</h2>
+                    <p>Toggle sections on or off, then adjust the order they appear in.</p>
                   </div>
-                  {runtimeDebug.variables && runtimeDebug.variables.length > 0 ? (
-                    <div className="kvList">
-                      {runtimeDebug.variables.map((variable) => {
-                        const variableKey = `${variable.scope}:${variable.name}`;
-                        const expanded =
-                          pinnedRuntimeVarKeys.includes(variableKey) ||
-                          hoveredRuntimeVarKey === variableKey;
+                </div>
+                <div className="inspectorSectionList">
+                  {sectionOrder.map((key, index) => {
+                    const meta = SECTION_DEFS.find((section) => section.key === key);
+                    if (!meta) {
+                      return null;
+                    }
 
-                        return (
-                          <div
-                            className={[
-                              "runtimeVarCard",
-                              expanded ? "isExpanded" : "",
-                              pinnedRuntimeVarKeys.includes(variableKey) ? "isPinned" : "",
-                            ].join(" ").trim()}
-                            key={variableKey}
-                            role="button"
-                            tabIndex={0}
-                            onMouseEnter={() => scheduleRuntimeVarHover(variableKey)}
-                            onMouseLeave={() => clearRuntimeVarHover(variableKey)}
-                            onClick={() => togglePinnedRuntimeVar(variableKey)}
-                            onKeyDown={(event) => {
-                              if (event.key !== "Enter" && event.key !== " ") return;
-                              event.preventDefault();
-                              togglePinnedRuntimeVar(variableKey);
+                    const visible = sectionVisible[key];
+
+                    return (
+                      <div
+                        key={key}
+                        className={[
+                          "inspectorSectionRow",
+                          visible ? "isVisible" : "isHidden",
+                          draggedSectionKey === key ? "isDragging" : "",
+                          dropSectionKey === key ? "isDropTarget" : "",
+                        ]
+                          .join(" ")
+                          .trim()}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          if (draggedSectionKey && draggedSectionKey !== key) {
+                            setDropSectionKey(key);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          setDropSectionKey((current) => (current === key ? null : current));
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          if (draggedSectionKey && draggedSectionKey !== key) {
+                            moveSectionToTarget(draggedSectionKey, key);
+                          }
+                          setDraggedSectionKey(null);
+                          setDropSectionKey(null);
+                        }}
+                      >
+                        <div className="inspectorSectionMeta">
+                          <button
+                            className="inspectorSectionDragHandle"
+                            type="button"
+                            draggable
+                            title={`Drag to reorder ${meta.title}`}
+                            aria-label={`Drag to reorder ${meta.title}`}
+                            onDragStart={(event) => {
+                              setDraggedSectionKey(key);
+                              setDropSectionKey(key);
+                              event.dataTransfer.effectAllowed = "move";
+                              event.dataTransfer.setData("text/plain", key);
+                            }}
+                            onDragEnd={() => {
+                              setDraggedSectionKey(null);
+                              setDropSectionKey(null);
                             }}
                           >
-                            <div className="runtimeVarCardTop">
-                              <div className="runtimeVarCardName mono" title={variable.scope}>
-                                {fmtRuntimeScope(variable.scope)} {variable.name}
-                              </div>
-                              <div className="runtimeVarCardValue mono" title={variable.value}>
-                                {expanded ? variable.value : compactRuntimeValue(variable.value)}
-                              </div>
-                            </div>
-
-                            {expanded ? (
-                              <div className="runtimeVarCardDetail">
-                                {variable.type ? (
-                                  <div className="runtimeVarCardMeta mono">{variable.type}</div>
-                                ) : null}
-                                {variable.evaluateName ? (
-                                  <div className="runtimeVarCardMeta mono">
-                                    {variable.evaluateName}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="mutedText">No useful locals or arguments yet.</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </InspectorPanel>
-
-          <InspectorPanel
-            className="panel--selected"
-            title="SELECTED NODE"
-            collapsedLabel="Selected"
-            open={sectionOpen.selected}
-            onToggle={() => toggleSection("selected")}
-            collapseDirection={collapseDirection}
-          >
-            {!selectedNode ? (
-              <div className="mutedText">
-                No node selected. Click a node in the graph.
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: 12 }}>
-                <div className="kvList">
-                  <div className="kvRow">
-                    <div className="kvKey mono">kind</div>
-                    <div className="kvVal mono">{selectedNode.kind}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">name</div>
-                    <div className="kvVal mono">{selectedNode.name}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">file</div>
-                    <div className="kvVal mono">{shortFile(selectedNode.file)}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">range</div>
-                    <div className="kvVal mono">{fmtRange(selectedNode)}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">signature</div>
-                    <div className="kvVal mono">
-                      {fmtSig(selectedNode as GraphNodeWithSig)}
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div
-                    className="mono"
-                    style={{ fontSize: 11, opacity: 0.75, marginBottom: 8 }}
-                  >
-                    Analyzer Context
-                  </div>
-                  <div className="kvList">
-                    <div className="kvRow">
-                      <div className="kvKey mono">mode</div>
-                      <div className="kvVal mono">
-                        {fmtAnalyzerMode(analysis?.meta?.mode)}
-                      </div>
-                    </div>
-                    <div className="kvRow">
-                      <div className="kvKey mono">language</div>
-                      <div className="kvVal mono">{analysis?.languageId ?? "(unknown)"}</div>
-                    </div>
-                    {analysis?.meta?.mode === "workspace" ? (
-                      <>
-                        <div className="kvRow">
-                          <div className="kvKey mono">root files</div>
-                          <div className="kvVal mono">{analysis.meta.rootFiles}</div>
+                            <GripVertical className="icon" />
+                          </button>
+                          <strong>{meta.title}</strong>
+                          <small>{meta.summary}</small>
                         </div>
-                        <div className="kvRow">
-                          <div className="kvKey mono">tsconfig</div>
-                          <div className="kvVal mono">
-                            {analysis.meta.usedTsconfig ? "enabled" : "fallback"}
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div>
-                  <div
-                    className="mono"
-                    style={{ fontSize: 11, opacity: 0.75, marginBottom: 8 }}
-                  >
-                    How This Node Is Connected
-                  </div>
-                  <div className="mutedText" style={{ marginBottom: 10 }}>
-                    These cards show who calls this node, what values flow into it, and what it
-                    reads or updates.
-                  </div>
-                  {selectedNodeEvidence.length === 0 ? (
-                    <div className="mutedText">
-                      No graph connections are attached to this node yet.
-                    </div>
-                  ) : (
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {selectedNodeEvidence.map((edge) => (
-                        <div
-                          key={edge.id}
-                          style={{
-                            padding: 10,
-                            borderRadius: 10,
-                            border: "1px solid var(--border)",
-                            background: "rgba(255,255,255,0.03)",
-                            display: "grid",
-                            gap: 6,
-                          }}
+                        <div className="inspectorSectionControls">
+                          <button
+                            className={[
+                              "inspectorToggleChip",
+                              visible ? "isActive" : "",
+                            ]
+                              .join(" ")
+                              .trim()}
+                            type="button"
+                            onClick={() => toggleSectionVisibility(key)}
                           >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 10,
-                              flexWrap: "wrap",
-                              }}
-                            >
-                              <div className="mono" style={{ fontSize: 11, opacity: 0.8 }}>
-                                {getEvidenceHeading(edge.kind, edge.direction)}
-                              </div>
-                              <button
-                                className="smallBtn"
-                                type="button"
-                                onClick={() => onSelectGraphNode(edge.otherId)}
-                              title={edge.otherFile ?? edge.otherName}
-                            >
-                              {edge.otherName}
-                            </button>
-                          </div>
-                          <div className="mutedText">{edge.reason}</div>
-                          {getEvidenceLabelText(edge.kind, edge.label) ? (
-                            <div className="mono" style={{ fontSize: 11, opacity: 0.72 }}>
-                              {getEvidenceLabelText(edge.kind, edge.label)}
-                            </div>
-                          ) : null}
+                            {visible ? "Shown" : "Hidden"}
+                          </button>
+                          <button
+                            className="smallBtn"
+                            type="button"
+                            onClick={() => moveSection(key, "up")}
+                            disabled={index === 0}
+                            title="Move up"
+                          >
+                            <ChevronUp className="icon" />
+                          </button>
+                          <button
+                            className="smallBtn"
+                            type="button"
+                            onClick={() => moveSection(key, "down")}
+                            disabled={index === sectionOrder.length - 1}
+                            title="Move down"
+                          >
+                            <ChevronDown className="icon" />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            )}
-          </InspectorPanel>
-
-          <InspectorPanel
-            className="panel--selection"
-            title="SELECTION"
-            collapsedLabel="Selection"
-            open={sectionOpen.selection}
-            onToggle={() => toggleSection("selection")}
-            collapseDirection={collapseDirection}
-          >
-            <div className="mono" style={{ fontSize: 11, opacity: 0.85 }}>
-              {selection
-                ? `${selection.start.line + 1}:${selection.start.character + 1} -> ${
-                    selection.end.line + 1
-                  }:${selection.end.character + 1}`
-                : "No selection"}
+              </section>
             </div>
-
-            <pre
-              className="mono"
-              style={{
-                margin: 0,
-                maxHeight: 140,
-                overflow: "auto",
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid var(--border)",
-                background: "rgba(255,255,255,0.03)",
-                fontSize: 12,
-                lineHeight: 1.45,
-                whiteSpace: "pre",
-              }}
-            >
-              {selection?.selectionText || ""}
-            </pre>
-          </InspectorPanel>
-
-          <InspectorPanel
-            className="panel--flow"
-            title="PARAM FLOW"
-            collapsedLabel="Flow"
-            open={sectionOpen.flow}
-            onToggle={() => toggleSection("flow")}
-            collapseDirection={collapseDirection}
-          >
-            {activeFlowCard ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <div className="inspectorFlowActive">
-                  <div className="inspectorFlowActiveTop">
-                    <span className="inspectorFlowActiveTitle">
-                      {activeFlowCard.origin === "trace" ? "Current Trace Flow" : "Focused Parameter Flow"}
-                    </span>
-                    <span className="inspectorFlowActiveBadge">
-                      {activeFlowCard.origin === "trace" ? "TRACE" : "FOCUS"}
-                    </span>
-                  </div>
-                  <div className="mono inspectorFlowActivePath">
-                    {activeFlowCard.from}
-                    {" -> "}
-                    {activeFlowCard.to}
-                  </div>
-                  <div className="mutedText mono" title={activeFlowCard.label}>
-                    {activeFlowCard.label}
-                  </div>
-                </div>
-
-                <div className="kvList">
-                  <div className="kvRow">
-                    <div className="kvKey mono">edge type</div>
-                    <div className="kvVal mono">{activeFlowEdge?.kind ?? "dataflow"}</div>
-                  </div>
-                  <div className="kvRow">
-                    <div className="kvKey mono">meaning</div>
-                    <div className="kvVal">
-                      {activeFlowReason ?? "Analyzer recorded this as the currently focused flow edge."}
-                    </div>
-                  </div>
-                  {activeFlowCard.label ? (
-                    <div className="kvRow">
-                      <div className="kvKey mono">mapping</div>
-                      <div className="kvVal mono">{activeFlowCard.label}</div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            {visibleParamFlows.length === 0 ? (
-              <div className="mutedText">
-                {selectedNode
-                  ? "No parameter flow for selected node."
-                  : "No parameter flow detected."}
-              </div>
-            ) : (
-              <div className="kvList">
-                {visibleParamFlows.map((f) => (
-                  <div
-                    className={[
-                      "kvRow",
-                      "inspectorFlowRow",
-                      activeFlowCard?.id === f.id ? "inspectorFlowRow--active" : "",
-                    ].join(" ")}
-                    key={f.id}
-                    style={{ display: "block" }}
-                    onClick={() =>
-                      onFocusParamFlow({
-                        edgeId: f.id,
-                        sourceId: f.sourceId,
-                        targetId: f.targetId,
-                      })
-                    }
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      onFocusParamFlow({
-                        edgeId: f.id,
-                        sourceId: f.sourceId,
-                        targetId: f.targetId,
-                      });
-                    }}
-                  >
-                    <div className="mono" style={{ fontSize: 12 }}>
-                      {f.from}
-                      {" -> "}
-                      {f.to}
-                    </div>
-                    <div className="mutedText mono" title={f.label}>
-                      {f.label}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </InspectorPanel>
-
-          <AnalysisPanel
-            analysis={analysis}
-            graph={graph}
-            className="panel--analysis"
-            collapsedLabel="Analysis"
-            onOpenDiagnostic={onOpenDiagnostic}
-            onSelectGraphNode={onSelectGraphNode}
-            onActivateGraphNode={onActivateGraphNode}
-            collapsed={!sectionOpen.analysis}
-            onToggleCollapsed={() => toggleSection("analysis")}
-            collapseDirection={collapseDirection}
-          />
+          ) : visibleOrderedSections.length > 0 ? (
+            visibleOrderedSections.map((key) => (
+              <Fragment key={key}>{sectionNodes[key]}</Fragment>
+            ))
+          ) : (
+            <div className="inspectorEmptyState">
+              <div className="mutedText">No inspector sections are visible.</div>
+              <button
+                className="smallBtn"
+                type="button"
+                onClick={() => setSettingsMode(true)}
+              >
+                Open Inspector Settings
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </aside>

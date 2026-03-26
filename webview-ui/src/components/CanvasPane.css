@@ -35,6 +35,10 @@
   will-change: transform;
 }
 
+.canvasOverlay {
+  z-index: 5000 !important;
+}
+
 /* ReactFlow node visuals (custom node content) */
 .cgNode {
   --cg-node-accent: color-mix(in srgb, var(--fg) 34%, transparent);
@@ -468,9 +472,15 @@
 }
 
 /* Edge label */
+.canvasFlow .react-flow__edgelabel-renderer {
+  z-index: 7000 !important;
+  pointer-events: none;
+}
+
 .cgEdgeLabel {
   position: absolute;
   pointer-events: none;
+  z-index: 7001;
   font-size: 10px;
   font-weight: 800;
   padding: 4px 8px;
@@ -478,6 +488,7 @@
   border: 1px solid var(--outlineSubtle);
   background: color-mix(in srgb, var(--surfaceCanvas) 88%, transparent);
   color: var(--textSoft);
+  box-shadow: 0 10px 24px color-mix(in srgb, black 26%, transparent);
 }
 
 /* Controls */
@@ -488,7 +499,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 5;
+  z-index: 5000;
 }
 
 .iconBtn {
@@ -589,7 +600,7 @@
   position: absolute;
   left: 14px;
   top: 14px;
-  z-index: 5;
+  z-index: 5000;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -605,7 +616,7 @@
   left: 50%;
   top: 14px;
   transform: translateX(-50%);
-  z-index: 6;
+  z-index: 5000;
   min-width: 280px;
   max-width: min(680px, calc(100% - 120px));
   padding: 10px 12px;
@@ -658,7 +669,7 @@
   background: color-mix(in srgb, var(--surfaceCanvas) 92%, transparent);
   box-shadow: 0 12px 28px color-mix(in srgb, black 18%, transparent);
   color: color-mix(in srgb, var(--fg) 92%, transparent);
-  z-index: 7;
+  z-index: 5000;
 }
 
 .canvasLoading--inline {
@@ -714,7 +725,7 @@
   position: absolute;
   left: 14px;
   bottom: 14px;
-  z-index: 5;
+  z-index: 5000;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -846,6 +857,131 @@
 .cgGroupCount {
   font-weight: 800;
   color: color-mix(in srgb, var(--accent) 60%, var(--fg));
+}
+
+.cgFolder {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(245, 158, 11, 0.14), transparent 28%),
+    linear-gradient(135deg, rgba(251, 191, 36, 0.08), rgba(180, 83, 9, 0.06)),
+    color-mix(in srgb, var(--surfaceCanvas) 54%, transparent);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  box-shadow:
+    inset 0 0 0 1px rgba(251, 191, 36, 0.06),
+    0 18px 34px rgba(120, 53, 15, 0.08);
+  padding: 26px 26px 30px;
+  box-sizing: border-box;
+  pointer-events: none;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+.cgFolder--collapsed {
+  border-style: dashed;
+  border-color: rgba(245, 158, 11, 0.42);
+  background:
+    linear-gradient(180deg, rgba(251, 191, 36, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(146, 64, 14, 0.08));
+}
+
+.cgFolder--collapsing {
+  border-color: rgba(245, 158, 11, 0.34);
+  opacity: 0.94;
+}
+
+.cgFolder--expanding {
+  animation: cgGroupExpandIn 220ms ease;
+}
+
+.cgFolder--selected {
+  border-color: rgba(251, 191, 36, 0.54);
+  box-shadow:
+    inset 0 0 0 1px rgba(251, 191, 36, 0.14),
+    0 20px 38px rgba(120, 53, 15, 0.12);
+}
+
+.cgFolderHeader {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  transform: translateY(-42%);
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 14px;
+  min-width: 200px;
+  max-width: min(72%, 460px);
+  width: max-content;
+  background: color-mix(in srgb, var(--surfaceCanvas) 92%, transparent);
+  border: 1px solid rgba(245, 158, 11, 0.36);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px rgba(120, 53, 15, 0.16);
+  pointer-events: auto;
+  z-index: 2;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+.cgFolderHeader:hover {
+  border-color: rgba(251, 191, 36, 0.52);
+  background: color-mix(in srgb, var(--surfaceCanvas) 96%, transparent);
+}
+
+.cgFolder--collapsing .cgFolderHeader {
+  transform: translateY(-42%) scale(0.985);
+  opacity: 0.92;
+}
+
+.cgFolder--expanding .cgFolderHeader {
+  transform: translateY(-42%) scale(1.01);
+}
+
+.cgFolderTitle {
+  font-size: 12px;
+  font-weight: 900;
+  color: rgb(245, 158, 11);
+  letter-spacing: 0.02em;
+}
+
+.cgFolderMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  font-size: 10px;
+  color: color-mix(in srgb, rgb(180, 83, 9) 70%, var(--fg));
+}
+
+.cgFolderPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cgFolderCount {
+  font-weight: 800;
+  color: rgb(251, 191, 36);
+}
+
+.cgHandle--folder {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(251, 191, 36, 0.72);
+  background: rgba(120, 53, 15, 0.82);
 }
 
 /* edge 선 굵기/명도 강화 */

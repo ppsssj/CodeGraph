@@ -95,11 +95,25 @@ type FileGroupData = {
   onToggleCollapsed?: () => void;
 };
 
-type NodeWithAbsolutePosition = Node<CodeNodeData | FileGroupData> & {
+type FolderGroupData = {
+  title: string;
+  subtitle: string;
+  subtitleTitle?: string;
+  kind: "folder";
+  path: string;
+  count: number;
+  collapsed?: boolean;
+  transitionState?: "collapsing" | "expanding";
+  onToggleCollapsed?: () => void;
+};
+
+type CanvasNodeData = CodeNodeData | FileGroupData | FolderGroupData;
+
+type NodeWithAbsolutePosition = Node<CanvasNodeData> & {
   positionAbsolute?: { x: number; y: number };
 };
 
-function getNodeAbsolutePosition(node: Node<CodeNodeData | FileGroupData>) {
+function getNodeAbsolutePosition(node: Node<CanvasNodeData>) {
   const absolute = (node as NodeWithAbsolutePosition).positionAbsolute;
   return absolute ?? node.position;
 }
@@ -111,7 +125,7 @@ function fitGraphView(inst: ReactFlowInstance | null, duration = 400) {
 
 function focusCanvasNode(
   inst: ReactFlowInstance | null,
-  node: Node<CodeNodeData | FileGroupData>,
+  node: Node<CanvasNodeData>,
   zoom: number,
   duration: number,
   focusOffset?: { x?: number; y?: number },
@@ -127,8 +141,8 @@ function focusCanvasNode(
 
 function focusCanvasNodePair(
   inst: ReactFlowInstance | null,
-  firstNode: Node<CodeNodeData | FileGroupData>,
-  secondNode: Node<CodeNodeData | FileGroupData>,
+  firstNode: Node<CanvasNodeData>,
+  secondNode: Node<CanvasNodeData>,
   zoom: number,
   duration: number,
 ) {
@@ -216,6 +230,34 @@ function formatFileGroupSubtitle(filePath: string, workspaceRoot?: string | null
   };
 }
 
+function folderKeyForFile(filePath: string) {
+  const normalizedDir = normalizePath(dirName(filePath));
+  return normalizedDir || ".";
+}
+
+function folderTitleForPath(folderPath: string, workspaceRoot?: string | null) {
+  if (folderPath === ".") {
+    return workspaceRoot ? baseName(workspaceRoot) : "ROOT";
+  }
+  return baseName(folderPath);
+}
+
+function formatFolderGroupSubtitle(folderPath: string, workspaceRoot?: string | null) {
+  if (folderPath === ".") {
+    const rootName = workspaceRoot ? baseName(workspaceRoot) : "Workspace root";
+    return {
+      subtitle: rootName,
+      subtitleTitle: workspaceRoot ?? rootName,
+    };
+  }
+
+  const relativeFolder = relativePathFromRoot(folderPath, workspaceRoot) || ".";
+  return {
+    subtitle: compactDisplayPath(relativeFolder),
+    subtitleTitle: relativeFolder,
+  };
+}
+
 function getGraphCounts(graph: GraphPayload | undefined) {
   return {
     graphNodes: graph?.nodes.length ?? 0,
@@ -249,6 +291,14 @@ function childTitle(parent: GraphNode, child: GraphNode) {
 function childKindLabel(child: GraphNode) {
   if (child.kind === "interface" && child.subkind) return child.subkind;
   return child.kind;
+}
+
+function formatNodeSubtitle(
+  kindLabel: string | undefined,
+  filePath: string,
+  line: number,
+) {
+  return `${kindLabel ?? "node"} - ${shortFile(filePath)}:${line + 1}`;
 }
 
 function getNodeToneClass(data: CodeNodeData): string {
@@ -622,7 +672,75 @@ function FileGroupNode({
     </div>
   );
 }
-const nodeTypes = { code: CodeNode, fileGroup: FileGroupNode };
+
+function FolderGroupNode({
+  data,
+  selected,
+}: {
+  data: FolderGroupData;
+  selected?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "cgFolder",
+        selected ? "cgFolder--selected" : "",
+        data.collapsed ? "cgFolder--collapsed" : "",
+        data.transitionState ? `cgFolder--${data.transitionState}` : "",
+      ].join(" ")}
+    >
+      <Handle
+        id="in-control"
+        type="target"
+        position={Position.Left}
+        className="cgHandle cgHandle--folder"
+      />
+      <Handle
+        id="out-control"
+        type="source"
+        position={Position.Right}
+        className="cgHandle cgHandle--folder"
+      />
+      <Handle
+        id="in-dataflow"
+        type="target"
+        position={Position.Top}
+        className="cgHandle cgHandle--folder"
+      />
+      <Handle
+        id="out-dataflow"
+        type="source"
+        position={Position.Bottom}
+        className="cgHandle cgHandle--folder"
+      />
+      <button
+        className="cgFolderHeader"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onToggleCollapsed?.();
+        }}
+        title={data.collapsed ? "Expand folder group" : "Collapse folder group"}
+      >
+        <div className="cgFolderTitle">{data.title}</div>
+        <div className="cgFolderMeta">
+          <span className="cgFolderPath" title={data.subtitleTitle ?? data.subtitle}>
+            {data.subtitle}
+          </span>
+          <span className="cgFolderCount">
+            {data.collapsed ? `${data.count} files hidden` : `${data.count} files`}
+          </span>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+const nodeTypes = {
+  code: CodeNode,
+  fileGroup: FileGroupNode,
+  folderGroup: FolderGroupNode,
+};
 type DataflowEdgeData = {
   label?: string;
   highlighted?: boolean;
@@ -671,6 +789,7 @@ function DataflowEdge({
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               opacity: data.muted ? 0.28 : data?.collapsedBridge ? 0.55 : 1,
               borderColor: data.highlighted ? "rgba(56,189,248,0.75)" : undefined,
+              zIndex: 7001,
             }}
           >
             {data.label}
@@ -703,15 +822,34 @@ function buildFileGroupIdByFile(graph?: GraphPayload) {
   return map;
 }
 
+function buildFolderGroupIdByFile(graph?: GraphPayload) {
+  const map = new Map<string, string>();
+  if (!graph) return map;
+
+  const filePaths = new Set<string>();
+  for (const node of graph.nodes) {
+    filePaths.add(normalizePath(node.file));
+  }
+
+  for (const filePath of filePaths) {
+    const folderKey = folderKeyForFile(filePath);
+    map.set(filePath, `folder:${folderKey}`);
+  }
+
+  return map;
+}
+
 function toReactFlowEdges(
   graph?: GraphPayload,
   selectedNodeIds?: string[],
   highlightedEdgeId?: string | null,
   collapsedFilePaths?: Set<string>,
+  collapsedFolderPaths?: Set<string>,
 ): Array<Edge<DataflowEdgeData>> {
   if (!graph) return [];
   const selectedNodeIdSet = new Set(selectedNodeIds ?? []);
   const collapsedFiles = collapsedFilePaths ?? new Set<string>();
+  const collapsedFolders = collapsedFolderPaths ?? new Set<string>();
 
   const existingNodeIds = new Set(graph.nodes.map((n) => n.id));
   const collapsedNodeIds = new Set(
@@ -727,15 +865,23 @@ function toReactFlowEdges(
 
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   const fileGroupIdByFile = buildFileGroupIdByFile(graph);
-  const visibleNodeKindById = new Map<string, GraphNode["kind"] | "fileGroup">();
+  const folderGroupIdByFile = buildFolderGroupIdByFile(graph);
+  const visibleNodeKindById = new Map<string, GraphNode["kind"] | "fileGroup" | "folderGroup">();
   for (const node of graph.nodes) {
     const fileKey = normalizePath(node.file);
+    const folderKey = folderKeyForFile(fileKey);
     const visibleId =
-      node.kind !== "file" && collapsedFiles.has(fileKey)
-        ? (fileGroupIdByFile.get(fileKey) ?? `file:${node.file}`)
-        : (parentIdByNodeId.get(node.id) ?? node.id);
+      node.kind !== "file" && collapsedFolders.has(folderKey)
+        ? (folderGroupIdByFile.get(fileKey) ?? `folder:${folderKey}`)
+        : node.kind !== "file" && collapsedFiles.has(fileKey)
+          ? (fileGroupIdByFile.get(fileKey) ?? `file:${node.file}`)
+          : (parentIdByNodeId.get(node.id) ?? node.id);
     const visibleKind =
-      node.kind !== "file" && collapsedFiles.has(fileKey) ? "fileGroup" : node.kind;
+      node.kind !== "file" && collapsedFolders.has(folderKey)
+        ? "folderGroup"
+        : node.kind !== "file" && collapsedFiles.has(fileKey)
+          ? "fileGroup"
+          : node.kind;
     if (!visibleNodeKindById.has(visibleId)) {
       visibleNodeKindById.set(visibleId, visibleKind);
     }
@@ -750,8 +896,20 @@ function toReactFlowEdges(
 
       const sourceFileKey = normalizePath(sourceNode.file);
       const targetFileKey = normalizePath(targetNode.file);
+      const sourceFolderKey = folderKeyForFile(sourceFileKey);
+      const targetFolderKey = folderKeyForFile(targetFileKey);
+      const sourceFolderCollapsed = collapsedFolders.has(sourceFolderKey);
+      const targetFolderCollapsed = collapsedFolders.has(targetFolderKey);
       const sourceFileCollapsed = collapsedFiles.has(sourceFileKey);
       const targetFileCollapsed = collapsedFiles.has(targetFileKey);
+
+      if (
+        sourceFolderCollapsed &&
+        targetFolderCollapsed &&
+        sourceFolderKey === targetFolderKey
+      ) {
+        return null;
+      }
 
       if (sourceFileCollapsed && targetFileCollapsed && sourceFileKey === targetFileKey) {
         return null;
@@ -759,21 +917,33 @@ function toReactFlowEdges(
 
       return {
         ...e,
-        source: sourceFileCollapsed
-          ? (fileGroupIdByFile.get(sourceFileKey) ?? `file:${sourceNode.file}`)
-          : (parentIdByNodeId.get(e.source) ?? e.source),
-        target: targetFileCollapsed
-          ? (fileGroupIdByFile.get(targetFileKey) ?? `file:${targetNode.file}`)
-          : (parentIdByNodeId.get(e.target) ?? e.target),
+        source: sourceFolderCollapsed
+          ? (folderGroupIdByFile.get(sourceFileKey) ?? `folder:${sourceFolderKey}`)
+          : sourceFileCollapsed
+            ? (fileGroupIdByFile.get(sourceFileKey) ?? `file:${sourceNode.file}`)
+            : (parentIdByNodeId.get(e.source) ?? e.source),
+        target: targetFolderCollapsed
+          ? (folderGroupIdByFile.get(targetFileKey) ?? `folder:${targetFolderKey}`)
+          : targetFileCollapsed
+            ? (fileGroupIdByFile.get(targetFileKey) ?? `file:${targetNode.file}`)
+            : (parentIdByNodeId.get(e.target) ?? e.target),
         originalSource: e.source,
         originalTarget: e.target,
-        sourceHandleId: sourceFileCollapsed
+        sourceHandleId: sourceFolderCollapsed
+          ? (e.kind === "dataflow" ? "out-dataflow" : "out-control")
+          : sourceFileCollapsed
           ? (e.kind === "dataflow" ? "out-dataflow" : "out-control")
           : (parentIdByNodeId.has(e.source) ? `out-child-${e.source}` : undefined),
-        targetHandleId: targetFileCollapsed
+        targetHandleId: targetFolderCollapsed
+          ? (e.kind === "dataflow" ? "in-dataflow" : "in-control")
+          : targetFileCollapsed
           ? (e.kind === "dataflow" ? "in-dataflow" : "in-control")
           : (parentIdByNodeId.has(e.target) ? `in-child-${e.target}` : undefined),
-        collapsedBridge: sourceFileCollapsed || targetFileCollapsed,
+        collapsedBridge:
+          sourceFolderCollapsed ||
+          targetFolderCollapsed ||
+          sourceFileCollapsed ||
+          targetFileCollapsed,
       };
     })
     .filter((edge): edge is NonNullable<typeof edge> => Boolean(edge))
@@ -843,6 +1013,7 @@ function toReactFlowEdges(
       source: e.source,
       target: e.target,
       type: isDataflow ? "dataflow" : undefined, // ✅ dataflow만 커스텀 엣지 사용
+      zIndex: isDataflow ? 3000 : isCollapsedBridge ? 1200 : 1,
       sourceHandle:
         e.sourceHandleId ?? (isDataflow ? "out-dataflow" : "out-control"),
       targetHandle:
@@ -1182,6 +1353,9 @@ function toReactFlowNodes(
   collapsedFilePaths?: Set<string>,
   collapsingFilePaths?: Set<string>,
   expandingFilePaths?: Set<string>,
+  collapsedFolderPaths?: Set<string>,
+  collapsingFolderPaths?: Set<string>,
+  expandingFolderPaths?: Set<string>,
   workspaceRoot?: string | null,
   traceActiveNodeId?: string | null,
   runtimeActiveNodeId?: string | null,
@@ -1197,7 +1371,8 @@ function toReactFlowNodes(
   ) => void,
   onOpenChildNode?: (nodeId: string) => void,
   onToggleFileGroup?: (filePath: string) => void,
-): Array<Node<CodeNodeData | FileGroupData>> {
+  onToggleFolderGroup?: (folderPath: string) => void,
+): Array<Node<CanvasNodeData>> {
   if (!graph) return [];
   const orderedFocusPulseRequests = [...(focusPulseRequests ?? [])].reverse();
   const existingNodeIds = new Set(graph.nodes.map((n) => n.id));
@@ -1205,6 +1380,9 @@ function toReactFlowNodes(
   const collapsedFiles = collapsedFilePaths ?? new Set<string>();
   const collapsingFiles = collapsingFilePaths ?? new Set<string>();
   const expandingFiles = expandingFilePaths ?? new Set<string>();
+  const collapsedFolders = collapsedFolderPaths ?? new Set<string>();
+  const collapsingFolders = collapsingFolderPaths ?? new Set<string>();
+  const expandingFolders = expandingFolderPaths ?? new Set<string>();
 
   // Reuse existing file-node ids if analyzer already created them.
   const fileNodeByPath = new Map<string, GraphNode>();
@@ -1236,6 +1414,8 @@ function toReactFlowNodes(
   const childColW = 340;
   const pad = 28;
   const headerH = 96;
+  const folderPad = 34;
+  const folderHeaderH = 88;
 
   const groups = [...byFile.entries()].map(([file, children]) => {
     const fileKey = normalizePath(file);
@@ -1275,6 +1455,277 @@ function toReactFlowNodes(
       height: layout.height,
     };
   });
+
+  const hasSelectedDescendant = (children: GraphNode[]) =>
+    children.some((child) => {
+      const childItems = childItemsByParentId.get(child.id) ?? [];
+      return (
+        selectedNodeIdSet.has(child.id) ||
+        traceActiveNodeId === child.id ||
+        runtimeActiveNodeId === child.id ||
+        childItems.some(
+          (grandchild) =>
+            selectedNodeIdSet.has(grandchild.id) ||
+            traceActiveNodeId === grandchild.id ||
+            runtimeActiveNodeId === grandchild.id,
+        )
+      );
+    });
+
+  const folderEntries = [...groups.reduce((map, group) => {
+    const folderPath = folderKeyForFile(group.file);
+    const current = map.get(folderPath) ?? [];
+    current.push(group);
+    map.set(folderPath, current);
+    return map;
+  }, new Map<string, typeof groups>()).entries()];
+
+  const folderGroups = folderEntries.map(([folderPath, fileGroups]) => {
+    const collapsed = collapsedFolders.has(folderPath);
+    const transitionState: FolderGroupData["transitionState"] = collapsingFolders.has(folderPath)
+      ? "collapsing"
+      : expandingFolders.has(folderPath)
+        ? "expanding"
+        : undefined;
+    const localGroupGapX = 170;
+    const localGroupGapY = 180;
+    const localMaxRowWidth = 1800;
+    let localCursorX = 0;
+    let localCursorY = 0;
+    let localRowH = 0;
+    let contentWidth = 0;
+    let contentHeight = 0;
+    const localPositions = new Map<string, Positioned>();
+
+    if (!collapsed) {
+      for (const fileGroup of fileGroups) {
+        if (localCursorX > 0 && localCursorX + fileGroup.width > localMaxRowWidth) {
+          localCursorX = 0;
+          localCursorY += localRowH + localGroupGapY;
+          localRowH = 0;
+        }
+
+        const localX = folderPad + localCursorX;
+        const localY = folderHeaderH + folderPad + localCursorY;
+        localPositions.set(fileGroup.file, { x: localX, y: localY });
+        contentWidth = Math.max(contentWidth, localX + fileGroup.width);
+        contentHeight = Math.max(contentHeight, localY + fileGroup.height);
+        localCursorX += fileGroup.width + localGroupGapX;
+        localRowH = Math.max(localRowH, fileGroup.height);
+      }
+    }
+
+    return {
+      folderPath,
+      fileGroups,
+      collapsed,
+      transitionState,
+      localPositions,
+      width: collapsed ? 360 : Math.max(420, contentWidth + folderPad),
+      height: collapsed
+        ? folderHeaderH + folderPad * 2 + 18
+        : Math.max(188, contentHeight + folderPad),
+      hasSelectedDescendant: fileGroups.some((group) => hasSelectedDescendant(group.children)),
+    };
+  });
+
+  const folderGapX = 220;
+  const folderGapY = 220;
+  const folderMaxRowWidth = 2500;
+  let folderCursorX = 0;
+  let folderCursorY = 0;
+  let folderRowHeight = 0;
+
+  const reactFlowNodes: Array<Node<CanvasNodeData>> = [];
+
+  for (const folder of folderGroups) {
+    const folderId = `folder:${folder.folderPath}`;
+    if (folderCursorX > 0 && folderCursorX + folder.width > folderMaxRowWidth) {
+      folderCursorX = 0;
+      folderCursorY += folderRowHeight + folderGapY;
+      folderRowHeight = 0;
+    }
+
+    const folderX = folderCursorX;
+    const folderY = folderCursorY;
+    folderCursorX += folder.width + folderGapX;
+    folderRowHeight = Math.max(folderRowHeight, folder.height);
+    const folderSubtitle = formatFolderGroupSubtitle(folder.folderPath, workspaceRoot);
+
+    reactFlowNodes.push({
+      id: folderId,
+      type: "folderGroup",
+      position: { x: folderX, y: folderY },
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      selected: folder.hasSelectedDescendant,
+      data: {
+        title: folderTitleForPath(folder.folderPath, workspaceRoot),
+        subtitle: folderSubtitle.subtitle,
+        subtitleTitle: folderSubtitle.subtitleTitle,
+        kind: "folder",
+        path: folder.folderPath,
+        count: folder.fileGroups.length,
+        collapsed: folder.collapsed,
+        transitionState: folder.transitionState,
+        onToggleCollapsed: onToggleFolderGroup
+          ? () => onToggleFolderGroup(folder.folderPath)
+          : undefined,
+      },
+      style: {
+        width: folder.width,
+        height: folder.height,
+        zIndex: 0,
+        transition: "width 180ms ease, height 180ms ease",
+      },
+    });
+
+    if (folder.collapsed) continue;
+
+    for (const group of folder.fileGroups) {
+      const existingFileNode = fileNodeByPath.get(group.file);
+      const parentId = existingFileNode?.id ?? `file:${group.file}`;
+      const groupSubtitle = formatFileGroupSubtitle(group.file, workspaceRoot);
+      const localPosition = folder.localPositions.get(group.file) ?? {
+        x: folderPad,
+        y: folderHeaderH + folderPad,
+      };
+      const groupX = folderX + localPosition.x;
+      const groupY = folderY + localPosition.y;
+
+      reactFlowNodes.push({
+        id: parentId,
+        type: "fileGroup",
+        position: { x: groupX, y: groupY },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        selected: hasSelectedDescendant(group.children),
+        data: {
+          title: baseName(group.file),
+          subtitle: groupSubtitle.subtitle,
+          subtitleTitle: groupSubtitle.subtitleTitle,
+          kind: "file",
+          file: group.file,
+          count: group.children.length,
+          collapsed: group.collapsed,
+          transitionState: group.transitionState,
+          onToggleCollapsed: onToggleFileGroup
+            ? () => onToggleFileGroup(group.file)
+            : undefined,
+        },
+        style: {
+          width: group.width,
+          height: group.height,
+          zIndex: 1,
+          transition: "width 180ms ease, height 180ms ease",
+        },
+      });
+
+      if (group.collapsed) continue;
+
+      for (let i = 0; i < group.children.length; i++) {
+        const n = group.children[i];
+        const childItems = childItemsByParentId.get(n.id) ?? [];
+        const sk = getInterfaceSubkind(n);
+        const kindLabel = String(n.kind) === "interface" && sk ? sk : n.kind;
+        const subtitle = formatNodeSubtitle(kindLabel, n.file, n.range.start.line);
+        const pos = group.positions.get(n.id) ?? {
+          x: pad,
+          y: headerH + pad + i * group.childRowH,
+        };
+        const hasSelectedChild = childItems.some((child) => selectedNodeIdSet.has(child.id));
+        const hasTraceActiveChild = childItems.some((child) => child.id === traceActiveNodeId);
+        const hasRuntimeActiveChild = childItems.some(
+          (child) => child.id === runtimeActiveNodeId,
+        );
+        const visiblePulseRequest = orderedFocusPulseRequests.find(
+          (request) => request.visibleNodeId === n.id,
+        );
+
+        const data: CodeNodeData = {
+          ...(diagnosticSummaryByNode.get(n.id) ?? {}),
+          title: nodeTitle(n),
+          subtitle,
+          kind: n.kind,
+          subkind: sk,
+          transitionState: group.transitionState,
+          highlighted: Boolean(highlightedNodeIds?.has(n.id)),
+          searchHit: Boolean(searchHitIds?.has(n.id)),
+          selected:
+            selectedNodeIdSet.has(n.id) ||
+            traceActiveNodeId === n.id ||
+            runtimeActiveNodeId === n.id ||
+            hasSelectedChild ||
+            hasTraceActiveChild ||
+            hasRuntimeActiveChild,
+          focusPulseToken: visiblePulseRequest?.token,
+          childItems: childItems.map((child) => {
+            const childPulseRequest = orderedFocusPulseRequests.find(
+              (request) => request.nodeId === child.id,
+            );
+            return {
+              id: child.id,
+              kind: childKindLabel(child),
+              title: childTitle(n, child),
+              selected:
+                selectedNodeIdSet.has(child.id) ||
+                traceActiveNodeId === child.id ||
+                runtimeActiveNodeId === child.id,
+              focusPulseToken: childPulseRequest?.token,
+              subtitle: formatNodeSubtitle(
+                childKindLabel(child),
+                child.file,
+                child.range.start.line,
+              ),
+              ...(diagnosticSummaryByNode.get(child.id) ?? {}),
+              onClick:
+                onSelectChildNode
+                  ? (event) =>
+                      onSelectChildNode(child.id, n.id, {
+                        toggle: isMultiSelectEvent(event),
+                        focusOffsetY:
+                          (() => {
+                            const childEl = event.currentTarget;
+                            const parentNodeEl = childEl.closest(".cgNode") as HTMLElement | null;
+                            if (!parentNodeEl) return 0;
+                            const childRect = childEl.getBoundingClientRect();
+                            const parentRect = parentNodeEl.getBoundingClientRect();
+                            const childCenterDelta =
+                              childRect.top +
+                              childRect.height / 2 -
+                              (parentRect.top + parentRect.height / 2);
+                            return childCenterDelta + 78;
+                          })(),
+                      })
+                  : undefined,
+              onDoubleClick:
+                onOpenChildNode ? () => onOpenChildNode(child.id) : undefined,
+            };
+          }),
+          file: n.file,
+        };
+        const nodeHeight = childItems.length > 0 ? 94 + childItems.length * 62 : undefined;
+
+        reactFlowNodes.push({
+          id: n.id,
+          position: pos,
+          type: "code",
+          data,
+          parentNode: parentId,
+          extent: "parent",
+          style: {
+            zIndex: 2,
+            width: childItems.length > 0 ? 272 : undefined,
+            height: nodeHeight,
+          },
+        });
+      }
+    }
+  }
+
+  return reactFlowNodes;
 
   // Dynamic shelf layout for file groups to avoid overlaps on varying group sizes.
   const groupGapX = 170;
@@ -1335,7 +1786,7 @@ function toReactFlowNodes(
         count: g.children.length,
         collapsed: g.collapsed,
         transitionState: g.transitionState,
-        onToggleCollapsed: onToggleFileGroup ? () => onToggleFileGroup(g.file) : undefined,
+        onToggleCollapsed: onToggleFileGroup ? () => onToggleFileGroup?.(g.file) : undefined,
       },
       style: {
         width: g.width,
@@ -1356,7 +1807,7 @@ function toReactFlowNodes(
 
       const sk = getInterfaceSubkind(n);
       const kindLabel = String(n.kind) === "interface" && sk ? sk : n.kind;
-      const subtitle = `${kindLabel} · ${shortFile(n.file)}:${n.range.start.line + 1}`;
+      const subtitle = formatNodeSubtitle(kindLabel, n.file, n.range.start.line);
       const pos = g.positions.get(n.id) ?? {
         x: pad,
         y: headerH + pad + i * g.childRowH,
@@ -1401,7 +1852,11 @@ function toReactFlowNodes(
             traceActiveNodeId === child.id ||
             runtimeActiveNodeId === child.id,
           focusPulseToken: childPulseRequest?.token,
-          subtitle: `${childKindLabel(child)} · ${shortFile(child.file)}:${child.range.start.line + 1}`,
+          subtitle: formatNodeSubtitle(
+            childKindLabel(child),
+            child.file,
+            child.range.start.line,
+          ),
           ...(diagnosticSummaryByNode.get(child.id) ?? {}),
           onClick:
             onSelectChildNode
@@ -1457,6 +1912,7 @@ export const CanvasPane = memo(function CanvasPane({
   hasData,
   graph,
   loadingState,
+  activeFilePath,
   activeFilter,
   searchQuery,
   rootNodeId,
@@ -1504,9 +1960,16 @@ export const CanvasPane = memo(function CanvasPane({
     visibleNodeId: string;
     token: number;
   } | null>(null);
+  const [groupFollowRequest, setGroupFollowRequest] = useState<{
+    nodeId: string;
+    token: number;
+  } | null>(null);
   const [collapsedFilePaths, setCollapsedFilePaths] = useState<string[]>([]);
   const [collapsingFilePaths, setCollapsingFilePaths] = useState<string[]>([]);
   const [expandingFilePaths, setExpandingFilePaths] = useState<string[]>([]);
+  const [collapsedFolderPaths, setCollapsedFolderPaths] = useState<string[]>([]);
+  const [collapsingFolderPaths, setCollapsingFolderPaths] = useState<string[]>([]);
+  const [expandingFolderPaths, setExpandingFolderPaths] = useState<string[]>([]);
   const filteredGraph = useMemo(
     () => filterGraph(graph, activeFilter),
     [graph, activeFilter],
@@ -1515,6 +1978,18 @@ export const CanvasPane = memo(function CanvasPane({
     if (!filteredGraph) return new Set<string>();
     return new Set(filteredGraph.nodes.map((node) => normalizePath(node.file)));
   }, [filteredGraph]);
+  const visibleFolderPathSet = useMemo(() => {
+    if (!filteredGraph) return new Set<string>();
+    return new Set(filteredGraph.nodes.map((node) => folderKeyForFile(node.file)));
+  }, [filteredGraph]);
+  const activeFolderPath = useMemo(
+    () => (activeFilePath ? folderKeyForFile(activeFilePath) : null),
+    [activeFilePath],
+  );
+  const activeFileKey = useMemo(
+    () => (activeFilePath ? normalizePath(activeFilePath) : null),
+    [activeFilePath],
+  );
   const collapsedFilePathSet = useMemo(() => {
     if (!filteredGraph) return new Set<string>();
     return new Set(
@@ -1541,7 +2016,54 @@ export const CanvasPane = memo(function CanvasPane({
       ),
     [expandingFilePaths, visibleFilePathSet],
   );
+  const collapsedFolderPathSet = useMemo(() => {
+    if (!filteredGraph) return new Set<string>();
+    return new Set(
+      collapsedFolderPaths.filter((folderPath) => visibleFolderPathSet.has(folderPath)),
+    );
+  }, [collapsedFolderPaths, filteredGraph, visibleFolderPathSet]);
+  const collapsingFolderPathSet = useMemo(
+    () =>
+      new Set(
+        collapsingFolderPaths.filter((folderPath) => visibleFolderPathSet.has(folderPath)),
+      ),
+    [collapsingFolderPaths, visibleFolderPathSet],
+  );
+  const expandingFolderPathSet = useMemo(
+    () =>
+      new Set(
+        expandingFolderPaths.filter((folderPath) => visibleFolderPathSet.has(folderPath)),
+      ),
+    [expandingFolderPaths, visibleFolderPathSet],
+  );
   const fileGroupIdByFile = useMemo(() => buildFileGroupIdByFile(graph), [graph]);
+  const folderGroupIdByFile = useMemo(() => buildFolderGroupIdByFile(graph), [graph]);
+
+  useEffect(() => {
+    if (!filteredGraph) {
+      setCollapsedFilePaths([]);
+      setCollapsingFilePaths([]);
+      setExpandingFilePaths([]);
+      setCollapsedFolderPaths([]);
+      setCollapsingFolderPaths([]);
+      setExpandingFolderPaths([]);
+      return;
+    }
+
+    const nextCollapsedFiles = [...visibleFilePathSet]
+      .filter((filePath) => filePath !== activeFileKey)
+      .sort((a, b) => a.localeCompare(b));
+    const nextCollapsedFolders = [...visibleFolderPathSet]
+      .filter((folderPath) => folderPath !== activeFolderPath)
+      .sort((a, b) => a.localeCompare(b));
+
+    setCollapsedFilePaths(nextCollapsedFiles);
+    setCollapsingFilePaths([]);
+    setExpandingFilePaths([]);
+    setCollapsedFolderPaths(nextCollapsedFolders);
+    setCollapsingFolderPaths([]);
+    setExpandingFolderPaths([]);
+  }, [activeFileKey, activeFolderPath, filteredGraph, visibleFilePathSet, visibleFolderPathSet]);
 
   useEffect(() => {
     if (!collapsingFilePaths.length) return;
@@ -1586,11 +2108,56 @@ export const CanvasPane = memo(function CanvasPane({
     };
   }, [expandingFilePaths]);
 
+  useEffect(() => {
+    if (!collapsingFolderPaths.length) return;
+
+    const timerIds = collapsingFolderPaths.map((folderPath) =>
+      window.setTimeout(() => {
+        setCollapsingFolderPaths((current) =>
+          current.filter((item) => item !== folderPath),
+        );
+        setCollapsedFolderPaths((current) =>
+          current.includes(folderPath) ? current : [...current, folderPath],
+        );
+      }, 180),
+    );
+
+    return () => {
+      for (const timerId of timerIds) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [collapsingFolderPaths]);
+
+  useEffect(() => {
+    if (!expandingFolderPaths.length) return;
+
+    const timerIds = expandingFolderPaths.map((folderPath) =>
+      window.setTimeout(() => {
+        setExpandingFolderPaths((current) =>
+          current.filter((item) => item !== folderPath),
+        );
+      }, 220),
+    );
+
+    return () => {
+      for (const timerId of timerIds) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [expandingFolderPaths]);
+
   const handleToggleFileGroup = useCallback(
     (filePath: string) => {
       const normalized = normalizePath(filePath);
+      const groupNodeId = fileGroupIdByFile.get(normalized) ?? `file:${filePath}`;
       const isCollapsed = collapsedFilePathSet.has(normalized);
       const isCollapsing = collapsingFilePathSet.has(normalized);
+
+      setGroupFollowRequest((current) => ({
+        nodeId: groupNodeId,
+        token: (current?.token ?? 0) + 1,
+      }));
 
       if (isCollapsed || isCollapsing) {
         setCollapsedFilePaths((current) =>
@@ -1616,7 +2183,34 @@ export const CanvasPane = memo(function CanvasPane({
           : [...current, normalized],
       );
     },
-    [collapsedFilePathSet, collapsingFilePathSet],
+    [collapsedFilePathSet, collapsingFilePathSet, fileGroupIdByFile],
+  );
+
+  const handleToggleFolderGroup = useCallback(
+    (folderPath: string) => {
+      const isCollapsed = collapsedFolderPathSet.has(folderPath);
+      const isCollapsing = collapsingFolderPathSet.has(folderPath);
+
+      setGroupFollowRequest((current) => ({
+        nodeId: `folder:${folderPath}`,
+        token: (current?.token ?? 0) + 1,
+      }));
+
+      if (isCollapsed || isCollapsing) {
+        setCollapsedFolderPaths((current) => current.filter((item) => item !== folderPath));
+        setCollapsingFolderPaths((current) => current.filter((item) => item !== folderPath));
+        setExpandingFolderPaths((current) =>
+          current.includes(folderPath) ? current : [...current, folderPath],
+        );
+        return;
+      }
+
+      setExpandingFolderPaths((current) => current.filter((item) => item !== folderPath));
+      setCollapsingFolderPaths((current) =>
+        current.includes(folderPath) ? current : [...current, folderPath],
+      );
+    },
+    [collapsedFolderPathSet, collapsingFolderPathSet],
   );
 
   const resolveVisibleNodeId = useCallback(
@@ -1625,8 +2219,19 @@ export const CanvasPane = memo(function CanvasPane({
       const target = graph.nodes.find((node) => node.id === nodeId);
       if (!target) return nodeId;
 
+      const normalizedFile = normalizePath(target.file);
+      const folderPath = folderKeyForFile(normalizedFile);
+      const collapsedFolderGroupId = folderGroupIdByFile.get(normalizedFile);
       const collapsedFileGroupId = fileGroupIdByFile.get(normalizePath(target.file));
-      if (target.kind !== "file" && collapsedFilePathSet.has(normalizePath(target.file))) {
+      if (collapsedFolderPathSet.has(folderPath)) {
+        return collapsedFolderGroupId ?? `folder:${folderPath}`;
+      }
+
+      if (target.kind === "file") {
+        return collapsedFileGroupId ?? nodeId;
+      }
+
+      if (collapsedFilePathSet.has(normalizedFile)) {
         return collapsedFileGroupId ?? nodeId;
       }
 
@@ -1635,7 +2240,7 @@ export const CanvasPane = memo(function CanvasPane({
       );
       return hasParent ? (target.parentId as string) : target.id;
     },
-    [collapsedFilePathSet, fileGroupIdByFile, graph],
+    [collapsedFilePathSet, collapsedFolderPathSet, fileGroupIdByFile, folderGroupIdByFile, graph],
   );
   const searchHitIds = useMemo(
     () => getSearchHitIds(filteredGraph, searchQuery),
@@ -1706,7 +2311,7 @@ export const CanvasPane = memo(function CanvasPane({
     [focusPulseRequest, inspectorPulseRequest, runtimePulseRequest, tracePulseRequest],
   );
 
-  const nodes = useMemo<Array<Node<CodeNodeData | FileGroupData>>>(
+  const nodes = useMemo<Array<Node<CanvasNodeData>>>(
     () =>
       toReactFlowNodes(
         filteredGraph,
@@ -1717,6 +2322,9 @@ export const CanvasPane = memo(function CanvasPane({
         collapsedFilePathSet,
         collapsingFilePathSet,
         expandingFilePathSet,
+        collapsedFolderPathSet,
+        collapsingFolderPathSet,
+        expandingFolderPathSet,
         workspaceRoot,
         traceActiveNodeId,
         runtimeActiveNodeId,
@@ -1756,15 +2364,20 @@ export const CanvasPane = memo(function CanvasPane({
           onOpenNode?.(target);
         },
         handleToggleFileGroup,
+        handleToggleFolderGroup,
       ),
     [
       analysisDiagnostics,
       collapsedFilePathSet,
       collapsingFilePathSet,
       expandingFilePathSet,
+      collapsedFolderPathSet,
+      collapsingFolderPathSet,
+      expandingFolderPathSet,
       filteredGraph,
       graph,
       handleToggleFileGroup,
+      handleToggleFolderGroup,
       onExpandExternal,
       onOpenNode,
       onSelectNode,
@@ -1794,8 +2407,15 @@ export const CanvasPane = memo(function CanvasPane({
         selectedNodeIds,
         highlightedEdgeId,
         collapsedFilePathSet,
+        collapsedFolderPathSet,
       ),
-    [collapsedFilePathSet, filteredGraph, highlightedEdgeId, selectedNodeIds],
+    [
+      collapsedFilePathSet,
+      collapsedFolderPathSet,
+      filteredGraph,
+      highlightedEdgeId,
+      selectedNodeIds,
+    ],
   );
   const edgeTopologyKey = useMemo(
     () =>
@@ -1901,7 +2521,7 @@ export const CanvasPane = memo(function CanvasPane({
 
   const handleNodeClick = (
     event: ReactMouseEvent,
-    node: Node<CodeNodeData | FileGroupData>,
+    node: Node<CanvasNodeData>,
   ) => {
     const toggle = isMultiSelectEvent(event);
     const graphNode = graph?.nodes.find((n) => n.id === node.id);
@@ -1921,6 +2541,8 @@ export const CanvasPane = memo(function CanvasPane({
       nodeId: node.id,
       visibleKind: node.data.kind,
     });
+    if (node.data?.kind === "file" || node.data?.kind === "folder") return;
+
     setFocusPulseRequest((current) => ({
       nodeId: node.id,
       visibleNodeId: node.id,
@@ -1931,13 +2553,11 @@ export const CanvasPane = memo(function CanvasPane({
       visibleNodeId: node.id,
       token: (current?.token ?? 0) + 1,
     }));
-
-    if (node.data?.kind === "file") return;
   };
 
   const handleNodeDoubleClick = (
     _event: ReactMouseEvent,
-    node: Node<CodeNodeData | FileGroupData>,
+    node: Node<CanvasNodeData>,
   ) => {
     const graphNode = graph?.nodes.find((n) => n.id === node.id);
     pushWebviewDebugEvent("canvas.node.doubleClick", {
@@ -1946,7 +2566,7 @@ export const CanvasPane = memo(function CanvasPane({
       graphNodeKind: graphNode?.kind ?? null,
       filePath: graphNode?.file ?? ("file" in node.data ? node.data.file : null),
     });
-    if (node.data.kind === "file" || !graphNode) return;
+    if (node.data.kind === "file" || node.data.kind === "folder" || !graphNode) return;
     onOpenNode?.(graphNode);
   };
 
@@ -1973,7 +2593,7 @@ export const CanvasPane = memo(function CanvasPane({
 
   const handleNodeContextMenu = (
     event: ReactMouseEvent,
-    node: Node<CodeNodeData | FileGroupData>,
+    node: Node<CanvasNodeData>,
   ) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1991,6 +2611,7 @@ export const CanvasPane = memo(function CanvasPane({
       clientY: event.clientY,
       ...getGraphCounts(graph),
     });
+    if (node.data.kind === "file" || node.data.kind === "folder") return;
     onSelectNode(node.id);
     onOpenScaffoldModal?.({
       clientX: event.clientX,
@@ -2102,18 +2723,27 @@ export const CanvasPane = memo(function CanvasPane({
       return;
     }
 
-    const sourceNodeId =
-      graph?.nodes.find((node) => node.id === traceFocusEvent.edge.source)?.parentId ??
-      traceFocusEvent.edge.source;
-    const targetNodeId =
-      graph?.nodes.find((node) => node.id === traceFocusEvent.edge.target)?.parentId ??
-      traceFocusEvent.edge.target;
+    const sourceNodeId = resolveVisibleNodeId(traceFocusEvent.edge.source);
+    const targetNodeId = resolveVisibleNodeId(traceFocusEvent.edge.target);
+    if (!sourceNodeId || !targetNodeId) return;
     const sourceNode = inst.getNode(sourceNodeId);
     const targetNode = inst.getNode(targetNodeId);
     if (!sourceNode || !targetNode) return;
 
+    if (sourceNode.id === targetNode.id) {
+      focusCanvasNode(inst, sourceNode, 1.05, 320);
+      return;
+    }
+
     focusCanvasNodePair(inst, sourceNode, targetNode, 0.9, 350);
-  }, [graph, nodes, traceCursor, traceFocusEvent, traceVisible, visibleTraceActiveNodeId]);
+  }, [
+    nodes,
+    resolveVisibleNodeId,
+    traceCursor,
+    traceFocusEvent,
+    traceVisible,
+    visibleTraceActiveNodeId,
+  ]);
 
   useEffect(() => {
     if (!ENABLE_AUTO_VIEWPORT_EFFECTS) return;
@@ -2192,6 +2822,17 @@ export const CanvasPane = memo(function CanvasPane({
       y: canvasFocusRequest.focusOffsetY ?? 0,
     });
   }, [canvasFocusRequest]);
+
+  useEffect(() => {
+    const inst = rfRef.current;
+    if (!inst || !groupFollowRequest) return;
+
+    const node = inst.getNode(groupFollowRequest.nodeId);
+    if (!node) return;
+
+    focusCanvasNode(inst, node, 1.02, 260);
+    setGroupFollowRequest(null);
+  }, [groupFollowRequest, nodeTopologyKey]);
 
   const isTraceAtEnd = traceCursor >= traceTotal;
   const renderEmptyState = (mode: "no-graph" | "no-visible") => (
@@ -2343,7 +2984,7 @@ export const CanvasPane = memo(function CanvasPane({
             >
               <Background gap={24} size={1} />
 
-              <div className="canvasControls">
+              <div className="canvasControls canvasOverlay">
                 <button className="iconBtn" onClick={onZoomIn} title="Zoom in">
                   <ZoomIn size={16} />
                 </button>
@@ -2375,7 +3016,7 @@ export const CanvasPane = memo(function CanvasPane({
 
               {/* Root bar (kept; currently not applied to layout in this file) */}
               {rootNodeId ? (
-                <div className="rootBanner">
+                <div className="rootBanner canvasOverlay">
                   <div className="rootText">
                     Root mode: <b>{rootNodeId}</b>
                   </div>
@@ -2389,6 +3030,7 @@ export const CanvasPane = memo(function CanvasPane({
                 <div
                   className={[
                     "canvasNotice",
+                    "canvasOverlay",
                     `canvasNotice--${notice.severity}`,
                   ].join(" ")}
                 >
@@ -2406,7 +3048,7 @@ export const CanvasPane = memo(function CanvasPane({
 
               {/* Selection actions */}
               {selectedNodeId ? (
-                <div className="selectionBanner">
+                <div className="selectionBanner canvasOverlay">
                   <button className="btnGhost" onClick={onUseSelectionAsRoot}>
                     Use selection as root
                   </button>
@@ -2415,6 +3057,7 @@ export const CanvasPane = memo(function CanvasPane({
 
               {traceVisible ? (
                 <div
+                  className="canvasOverlay"
                   style={{
                     position: "absolute",
                     left: "50%",
@@ -2427,7 +3070,7 @@ export const CanvasPane = memo(function CanvasPane({
                     borderRadius: 12,
                     border: "1px solid rgba(56,189,248,0.35)",
                     background: "rgba(8,18,38,0.82)",
-                    zIndex: 7,
+                    zIndex: 5000,
                   }}
                 >
                   {renderTraceControls()}
@@ -2452,6 +3095,7 @@ type Props = {
     detail?: string;
   } | null;
 
+  activeFilePath?: string | null;
   activeFilter: ChipKey[];
   searchQuery: string;
   rootNodeId: string | null;
