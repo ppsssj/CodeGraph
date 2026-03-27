@@ -92,6 +92,7 @@ type FileGroupData = {
   count: number;
   collapsed?: boolean;
   transitionState?: "collapsing" | "expanding";
+  onSelect?: () => void;
   onToggleCollapsed?: () => void;
 };
 
@@ -664,9 +665,10 @@ function FileGroupNode({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          data.onSelect?.();
           data.onToggleCollapsed?.();
         }}
-        title={data.collapsed ? "Expand file group" : "Collapse file group"}
+        title={data.collapsed ? "Select and expand file group" : "Select and collapse file group"}
       >
         <div className="cgGroupTitle">{data.title}</div>
         <div className="cgGroupMeta">
@@ -1379,6 +1381,7 @@ function toReactFlowNodes(
     options?: { toggle?: boolean; focusOffsetY?: number },
   ) => void,
   onOpenChildNode?: (nodeId: string) => void,
+  onSelectFileGroup?: (nodeId: string) => void,
   onToggleFileGroup?: (filePath: string) => void,
   onToggleFolderGroup?: (folderPath: string) => void,
 ): Array<Node<CanvasNodeData>> {
@@ -1604,25 +1607,26 @@ function toReactFlowNodes(
       const groupY = folderY + localPosition.y;
 
       reactFlowNodes.push({
-        id: parentId,
-        type: "fileGroup",
-        position: { x: groupX, y: groupY },
-        draggable: false,
-        selectable: false,
-        focusable: false,
-        selected: hasSelectedDescendant(group.children),
+      id: parentId,
+      type: "fileGroup",
+      position: { x: groupX, y: groupY },
+      draggable: false,
+      selectable: true,
+      focusable: true,
+      selected: hasSelectedDescendant(group.children) || selectedNodeIdSet.has(parentId),
         data: {
           title: baseName(group.file),
           subtitle: groupSubtitle.subtitle,
           subtitleTitle: groupSubtitle.subtitleTitle,
           kind: "file",
           file: group.file,
-          count: group.children.length,
-          collapsed: group.collapsed,
-          transitionState: group.transitionState,
-          onToggleCollapsed: onToggleFileGroup
-            ? () => onToggleFileGroup(group.file)
-            : undefined,
+        count: group.children.length,
+        collapsed: group.collapsed,
+        transitionState: group.transitionState,
+        onSelect: onSelectFileGroup ? () => onSelectFileGroup?.(parentId) : undefined,
+        onToggleCollapsed: onToggleFileGroup
+          ? () => onToggleFileGroup(group.file)
+          : undefined,
         },
         style: {
           width: group.width,
@@ -1783,9 +1787,9 @@ function toReactFlowNodes(
       type: "fileGroup",
       position: { x: gx, y: gy },
       draggable: false,
-      selectable: false,
-      focusable: false,
-      selected: hasSelectedDescendant,
+      selectable: true,
+      focusable: true,
+      selected: hasSelectedDescendant || selectedNodeIdSet.has(parentId),
       data: {
         title: baseName(g.file),
         subtitle: groupSubtitle.subtitle,
@@ -1795,6 +1799,7 @@ function toReactFlowNodes(
         count: g.children.length,
         collapsed: g.collapsed,
         transitionState: g.transitionState,
+        onSelect: onSelectFileGroup ? () => onSelectFileGroup?.(parentId) : undefined,
         onToggleCollapsed: onToggleFileGroup ? () => onToggleFileGroup?.(g.file) : undefined,
       },
       style: {
@@ -1924,7 +1929,7 @@ export const CanvasPane = memo(function CanvasPane({
   activeFilePath,
   activeFilter,
   searchQuery,
-  rootNodeId,
+  rootFilePath,
   onClearRoot,
   selectedNodeId,
   selectedNodeIds,
@@ -1932,7 +1937,7 @@ export const CanvasPane = memo(function CanvasPane({
   onClearSelection,
   onOpenNode,
   onGenerateFromActive,
-  onUseSelectionAsRoot,
+  onUseSelectedFileAsRoot,
   onExpandExternal,
   analysisDiagnostics,
   highlightedNodeIds,
@@ -2445,6 +2450,16 @@ export const CanvasPane = memo(function CanvasPane({
           if (!target) return;
           onOpenNode?.(target);
         },
+        (nodeId) => {
+          const target = graph?.nodes.find((node) => node.id === nodeId);
+          pushWebviewDebugEvent("canvas.file-group.select", {
+            nodeId,
+            nodeKind: target?.kind ?? null,
+            filePath: target?.file ?? null,
+            ...getGraphCounts(graph),
+          });
+          onSelectNode(nodeId);
+        },
         handleToggleFileGroup,
         handleToggleFolderGroup,
       ),
@@ -2508,6 +2523,14 @@ export const CanvasPane = memo(function CanvasPane({
     [edges],
   );
   const visibleHasData = nodes.length > 0;
+  const selectedGraphFileNode = useMemo(
+    () => {
+      const node =
+        selectedNodeId ? graph?.nodes.find((graphNode) => graphNode.id === selectedNodeId) ?? null : null;
+      return node?.kind === "file" ? node : null;
+    },
+    [graph, selectedNodeId],
+  );
 
   const clearSnapshotTimers = useCallback(() => {
     for (const timerId of snapshotTimersRef.current) {
@@ -2562,7 +2585,7 @@ export const CanvasPane = memo(function CanvasPane({
       viewportY: viewport?.y ?? null,
       viewportZoom: viewport?.zoom ?? null,
       selectedNodeId,
-      rootNodeId,
+      rootFilePath,
       ...getGraphCounts(graph),
       ...(extra ?? {}),
     };
@@ -2586,7 +2609,7 @@ export const CanvasPane = memo(function CanvasPane({
     hasData,
     nodes.length,
     requestCanvasRecovery,
-    rootNodeId,
+    rootFilePath,
     selectedNodeId,
     visibleHasData,
   ]);
@@ -2623,7 +2646,7 @@ export const CanvasPane = memo(function CanvasPane({
       nodeId: node.id,
       visibleKind: node.data.kind,
     });
-    if (node.data?.kind === "file" || node.data?.kind === "folder") return;
+    if (node.data?.kind === "folder") return;
 
     setFocusPulseRequest((current) => ({
       nodeId: node.id,
@@ -2761,7 +2784,7 @@ export const CanvasPane = memo(function CanvasPane({
       filteredNodes: filteredGraph?.nodes.length ?? 0,
       filteredEdges: filteredGraph?.edges.length ?? 0,
       selectedNodeId,
-      rootNodeId,
+      rootFilePath,
       highlightedEdgeId,
       nodeTopologyKey: shortenTopologyKey(nodeTopologyKey),
       edgeTopologyKey: shortenTopologyKey(edgeTopologyKey),
@@ -2781,7 +2804,7 @@ export const CanvasPane = memo(function CanvasPane({
     nodeTopologyKey,
     nodes.length,
     edges.length,
-    rootNodeId,
+    rootFilePath,
     selectedNodeId,
     visibleHasData,
   ]);
@@ -3098,10 +3121,10 @@ export const CanvasPane = memo(function CanvasPane({
               </div>
 
               {/* Root bar (kept; currently not applied to layout in this file) */}
-              {rootNodeId ? (
+              {rootFilePath ? (
                 <div className="rootBanner canvasOverlay">
                   <div className="rootText">
-                    Root mode: <b>{rootNodeId}</b>
+                    Root file: <b>{baseName(rootFilePath)}</b>
                   </div>
                   <button className="btnGhost" onClick={onClearRoot}>
                     Clear root
@@ -3130,10 +3153,10 @@ export const CanvasPane = memo(function CanvasPane({
               </div>
 
               {/* Selection actions */}
-              {selectedNodeId ? (
+              {selectedGraphFileNode?.file ? (
                 <div className="selectionBanner canvasOverlay">
-                  <button className="btnGhost" onClick={onUseSelectionAsRoot}>
-                    Use selection as root
+                  <button className="btnGhost" onClick={onUseSelectedFileAsRoot}>
+                    Use selected file as root
                   </button>
                 </div>
               ) : null}
@@ -3181,7 +3204,7 @@ type Props = {
   activeFilePath?: string | null;
   activeFilter: ChipKey[];
   searchQuery: string;
-  rootNodeId: string | null;
+  rootFilePath: string | null;
   onClearRoot: () => void;
 
   selectedNodeId: string | null;
@@ -3192,7 +3215,7 @@ type Props = {
   onOpenNode?: (node: GraphNode) => void;
 
   onGenerateFromActive: () => void;
-  onUseSelectionAsRoot: () => void;
+  onUseSelectedFileAsRoot: () => void;
 
   onExpandExternal?: (filePath: string) => void;
   analysisDiagnostics?: CodeDiagnostic[];

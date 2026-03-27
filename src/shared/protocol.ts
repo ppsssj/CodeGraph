@@ -19,6 +19,10 @@ export type WebviewToExtMessage =
       type: "selectWorkspaceFile";
       payload: { filePath: string; graphDepth?: number };
     }
+  | {
+      type: "setGraphRootFile";
+      payload: { filePath: string | null };
+    }
   | { type: "expandNode"; payload: { filePath: string; generation?: number } }
   | { type: "setGraphDepth"; payload: { graphDepth: number } }
   | {

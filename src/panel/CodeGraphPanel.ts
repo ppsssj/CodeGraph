@@ -110,6 +110,11 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
       graphDepth: msg.payload.graphDepth ?? null,
     };
   }
+  if (msg.type === "setGraphRootFile") {
+    return {
+      filePath: msg.payload.filePath,
+    };
+  }
   if (msg.type === "analyzeActiveFile") {
     return {
       traceMode: msg.payload?.traceMode ?? false,
@@ -146,6 +151,7 @@ export class CodeGraphPanel {
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
   private readonly suppressedAutoAnalysisUris = new Map<string, number>();
+  private graphRootFilePath: string | null = null;
   private analysisGeneration = 0;
   private analysisSequence = 0;
   private latestActiveAnalysisSequence = 0;
@@ -312,6 +318,10 @@ export class CodeGraphPanel {
             }
             return await this.selectWorkspaceFile(msg.payload.filePath);
           }
+          if (msg.type === "setGraphRootFile") {
+            this.graphRootFilePath = msg.payload.filePath;
+            return;
+          }
           if (msg.type === "setGraphDepth") {
             this.graphDepth = clampGraphDepth(msg.payload.graphDepth);
             return;
@@ -405,6 +415,18 @@ export class CodeGraphPanel {
         return;
       }
 
+      if (
+        this.graphRootFilePath &&
+        normalizeComparablePath(editor.document.fileName) !==
+          normalizeComparablePath(this.graphRootFilePath)
+      ) {
+        pushPanelDebugEvent("analysis.auto.skipped.graph-root-lock", {
+          filePath: editor.document.fileName,
+          graphRootFilePath: this.graphRootFilePath,
+        });
+        return;
+      }
+
       pushPanelDebugEvent("analysis.auto.scheduled.from-active-editor", {
         filePath: editor.document.fileName,
       });
@@ -422,6 +444,19 @@ export class CodeGraphPanel {
         return;
       }
 
+      if (
+        this.graphRootFilePath &&
+        normalizeComparablePath(active.fileName) !==
+          normalizeComparablePath(this.graphRootFilePath)
+      ) {
+        pushPanelDebugEvent("analysis.auto.skipped.document-change.graph-root-lock", {
+          filePath: active.fileName,
+          graphRootFilePath: this.graphRootFilePath,
+        });
+        this.postActiveFile();
+        return;
+      }
+
       this.postActiveFile();
       scheduleAnalysis(350);
     });
@@ -434,6 +469,18 @@ export class CodeGraphPanel {
         return;
       }
       if (doc.uri.toString() !== active.uri.toString()) {
+        return;
+      }
+
+      if (
+        this.graphRootFilePath &&
+        normalizeComparablePath(active.fileName) !==
+          normalizeComparablePath(this.graphRootFilePath)
+      ) {
+        pushPanelDebugEvent("analysis.auto.skipped.save.graph-root-lock", {
+          filePath: active.fileName,
+          graphRootFilePath: this.graphRootFilePath,
+        });
         return;
       }
 

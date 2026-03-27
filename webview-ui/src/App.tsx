@@ -360,38 +360,6 @@ function summarizeDiagnostics(diagnostics: CodeDiagnostic[]): UINotice | null {
   };
 }
 
-/** Pick the most specific node that contains selection.start (same file, smallest range). */
-function pickRootNodeFromSelection(
-  graph: GraphPayload,
-  selection: NonNullable<SelectionPayload>,
-): string | null {
-  const selFile = normalizePath(uriToFsPath(selection.uri));
-  const pos = selection.start;
-
-  let best: GraphNode | null = null;
-  let bestSize = Number.POSITIVE_INFINITY;
-
-  for (const n of graph.nodes) {
-    const nFile = normalizePath(n.file);
-    if (nFile !== selFile && !nFile.endsWith(selFile)) continue;
-
-    const start = n.range?.start;
-    const end = n.range?.end;
-    if (!start || !end) continue;
-
-    if (!inRange(pos, start, end)) continue;
-
-    const size =
-      (end.line - start.line) * 1_000_000 + (end.character - start.character);
-    if (size < bestSize) {
-      best = n;
-      bestSize = size;
-    }
-  }
-
-  return best?.id ?? null;
-}
-
 function downloadText(filename: string, text: string, type: string) {
   const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
@@ -620,9 +588,7 @@ export default function App() {
   const [isResizingScaffoldPanel, setIsResizingScaffoldPanel] = useState(false);
   const [scaffoldPanelInactive, setScaffoldPanelInactive] = useState(false);
 
-  const [pendingUseSelectionAsRoot, setPendingUseSelectionAsRoot] =
-    useState(false);
-  const [rootNodeId, setRootNodeId] = useState<string | null>(null);
+  const [rootFilePath, setRootFilePath] = useState<string | null>(null);
 
   // Inspector UI
   const LS_INSPECTOR_OPEN = "cg.inspector.open";
@@ -890,15 +856,9 @@ export default function App() {
     setScaffoldModalOpen(true);
   }, []);
 
-  // Keep latest values for selection-root logic
-  const pendingRootRef = useRef(false);
   const graphRef = useRef<GraphPayload | undefined>(undefined);
   const activeGraphGenerationRef = useRef(-1);
   const latestActiveSequenceRef = useRef(0);
-
-  useEffect(() => {
-    pendingRootRef.current = pendingUseSelectionAsRoot;
-  }, [pendingUseSelectionAsRoot]);
 
   useEffect(() => {
     graphRef.current = graphState;
@@ -965,40 +925,6 @@ export default function App() {
 
       if (msg.type === "selection") {
         setSelection(msg.payload);
-
-        const pending = pendingRootRef.current;
-        const g = graphRef.current;
-
-        if (pending && msg.payload && g) {
-          const nextRootId = pickRootNodeFromSelection(g, msg.payload);
-          setRootNodeId(nextRootId);
-          if (nextRootId) {
-            setInspectorNotice(null);
-          } else {
-            setInspectorNotice({
-              id: `root-${Date.now()}`,
-              scope: "inspector",
-              severity: "warning",
-              message: "Could not derive a root from the current selection",
-              detail: "Try selecting inside a function, method, or class body.",
-              source: "selection-root",
-            });
-          }
-        } else if (pending && !msg.payload) {
-          setInspectorNotice({
-            id: `selection-${Date.now()}`,
-            scope: "inspector",
-            severity: "warning",
-            message: "Selection is not available",
-            detail: "Focus a code editor and try selecting a symbol again.",
-            source: "selection-root",
-          });
-        }
-
-        if (pending) {
-          pendingRootRef.current = false;
-          setPendingUseSelectionAsRoot(false);
-        }
         return;
       }
 
@@ -1072,7 +998,7 @@ export default function App() {
             clearSelectedNodes();
             setFocusedFlow(null);
             setInspectorFocusRequest(null);
-            setRootNodeId(null);
+            syncGraphRootFile(null);
             setCanvasNotice(null);
             return;
           }
@@ -1083,7 +1009,6 @@ export default function App() {
           clearSelectedNodes();
           setFocusedFlow(null);
           setInspectorFocusRequest(null);
-          setRootNodeId(null);
 
           if (trace && trace.length > 0) {
             pushWebviewDebugEvent("analysisResult.applied.active.trace", {
@@ -1541,10 +1466,21 @@ export default function App() {
   }, []);
 
   const activeFilePath = activeFile ? uriToFsPath(activeFile.uri) : null;
+  const graphFilePath = rootFilePath ?? activeFilePath;
   const workspaceRoot = workspaceFiles?.rootPath ?? null;
-  const projectName = activeFile?.fileName ? activeFile.fileName : "Select file";
+  const projectName = graphFilePath ? shortBaseName(graphFilePath) : "Select file";
   const exportBaseName =
-    activeFile?.fileName?.replace(/[^\w.-]+/g, "_")?.slice(0, 64) || "codegraph";
+    shortBaseName(graphFilePath ?? activeFile?.fileName ?? "codegraph")
+      .replace(/[^\w.-]+/g, "_")
+      .slice(0, 64) || "codegraph";
+
+  const syncGraphRootFile = useCallback((filePath: string | null) => {
+    setRootFilePath(filePath);
+    postMessage("app.graphRoot.sync", {
+      type: "setGraphRootFile",
+      payload: { filePath },
+    });
+  }, [postMessage]);
 
   const beginAnalysisLoading = useCallback((message: string, detail?: string) => {
     setAnalysisLoading({ active: true, message, detail });
@@ -1580,9 +1516,9 @@ export default function App() {
     clearSelectedNodes();
     setFocusedFlow(null);
     setInspectorFocusRequest(null);
-    setRootNodeId(null);
+    syncGraphRootFile(null);
     setInspectorNotice(null);
-  }, [clearSelectedNodes]);
+  }, [clearSelectedNodes, syncGraphRootFile]);
 
   const stepTraceTo = useCallback((nextCursor: number) => {
     if (!traceEvents || traceEvents.length === 0) return;
@@ -1731,23 +1667,61 @@ export default function App() {
       traceMode ? "Loading trace graph..." : "Rendering graph...",
       traceMode
         ? "Tracing the active file and preparing a step-by-step graph view."
-        : `Analyzing the active file with ${describeDepth(graphDepth)}.`,
+        : `Analyzing ${shortBaseName(graphFilePath ?? activeFilePath ?? "the active file")} with ${describeDepth(graphDepth)}.`,
     );
+    if (!traceMode && graphFilePath) {
+      postMessage("canvas.emptyState.generate.rootFile", {
+        type: "selectWorkspaceFile",
+        payload: { filePath: graphFilePath, graphDepth },
+      });
+      return;
+    }
     postMessage("canvas.emptyState.generate", {
       type: "analyzeActiveFile",
       payload: { traceMode, graphDepth },
     });
-  }, [beginAnalysisLoading, graphDepth, postMessage, traceMode]);
+  }, [activeFilePath, beginAnalysisLoading, graphDepth, graphFilePath, postMessage, traceMode]);
 
-  const handleUseSelectionAsRoot = useCallback(() => {
-    setPendingUseSelectionAsRoot(true);
-    postMessage("canvas.useSelectionAsRoot", { type: "requestSelection" });
-  }, [postMessage]);
+  const handleUseSelectedFileAsRoot = useCallback(() => {
+    if (!selectedNode?.file || selectedNode.kind !== "file") {
+      return;
+    }
+    const nextRootFilePath = selectedNode.file;
+    syncGraphRootFile(nextRootFilePath);
+    setInspectorNotice(null);
+    if (normalizeComparablePath(nextRootFilePath) === normalizeComparablePath(graphFilePath ?? "")) {
+      return;
+    }
+    activeGraphGenerationRef.current = -1;
+    setTraceEvents(null);
+    setTraceCursor(0);
+    setGraphState(undefined);
+    expandedFilesRef.current.clear();
+    clearSelectedNodes();
+    setFocusedFlow(null);
+    setInspectorFocusRequest(null);
+    beginAnalysisLoading(
+      `Locking graph to ${shortBaseName(nextRootFilePath)}...`,
+      `Rebuilding the graph with ${describeDepth(graphDepth)}.`,
+    );
+    postMessage("canvas.useSelectedFileAsRoot", {
+      type: "selectWorkspaceFile",
+      payload: { filePath: nextRootFilePath, graphDepth },
+    });
+  }, [
+    beginAnalysisLoading,
+    clearSelectedNodes,
+    graphDepth,
+    graphFilePath,
+    postMessage,
+    selectedNode,
+    syncGraphRootFile,
+  ]);
 
   const handleClearRoot = useCallback(() => {
-    setRootNodeId(null);
+    syncGraphRootFile(null);
     setInspectorNotice(null);
-  }, []);
+  }, [syncGraphRootFile]);
 
   const activateGraphNode = (nodeId: string) => {
     setFocusedFlow(null);
@@ -1829,7 +1803,7 @@ export default function App() {
   const buildFlowExportPayload = () => {
     const graphPrimaryFilePath = getPrimaryGraphFilePath(graph);
     const exportFilePath =
-      graphPrimaryFilePath ?? (activeFile ? uriToFsPath(activeFile.uri) : null);
+      rootFilePath ?? graphPrimaryFilePath ?? (activeFile ? uriToFsPath(activeFile.uri) : null);
     const exportActiveFile =
       exportFilePath
         ? {
@@ -1849,7 +1823,7 @@ export default function App() {
         activeFilter: activeChip,
         graphDepth,
         searchQuery,
-        rootNodeId,
+        rootFilePath,
         selectedNodeId,
         selectedNodeIds,
         inspector: {
@@ -2028,9 +2002,10 @@ export default function App() {
         projectName={projectName}
         workspaceRootName={workspaceFiles?.rootName ?? null}
         workspaceFiles={workspaceFiles?.files ?? []}
-        activeFilePath={activeFilePath}
+        activeFilePath={graphFilePath}
         onPickFile={(filePath) => {
           resetGraph();
+          syncGraphRootFile(filePath);
           beginAnalysisLoading(
             `Loading ${shortBaseName(filePath)}...`,
             `Building the graph with ${describeDepth(graphDepth)}.`,
@@ -2045,12 +2020,23 @@ export default function App() {
           const normalized = clampGraphDepth(nextDepth);
           if (normalized === graphDepth) {return;}
           setGraphDepth(normalized);
-          if (traceMode || !activeFilePath) {return;}
+          if (traceMode) {return;}
           resetGraph();
+          if (graphFilePath) {
+            syncGraphRootFile(graphFilePath);
+          }
           beginAnalysisLoading(
             "Rebuilding graph...",
             `Updating the view for ${describeDepth(normalized)}.`,
           );
+          if (graphFilePath) {
+            postMessage("topbar.graphDepth.change.rootFile", {
+              type: "selectWorkspaceFile",
+              payload: { filePath: graphFilePath, graphDepth: normalized },
+            });
+            return;
+          }
+          if (!activeFilePath) {return;}
           postMessage("topbar.graphDepth.change", {
             type: "analyzeActiveFile",
             payload: { traceMode: false, graphDepth: normalized },
@@ -2063,12 +2049,22 @@ export default function App() {
         }}
         onGenerate={() => {
           resetGraph();
+          if (!traceMode && graphFilePath) {
+            syncGraphRootFile(graphFilePath);
+          }
           beginAnalysisLoading(
             traceMode ? "Loading trace graph..." : "Rendering graph...",
             traceMode
               ? "Tracing the active file and preparing a step-by-step graph view."
-              : `Analyzing the active file with ${describeDepth(graphDepth)}.`,
+              : `Analyzing ${shortBaseName(graphFilePath ?? activeFilePath ?? "the active file")} with ${describeDepth(graphDepth)}.`,
           );
+          if (!traceMode && graphFilePath) {
+            postMessage("topbar.generate.rootFile", {
+              type: "selectWorkspaceFile",
+              payload: { filePath: graphFilePath, graphDepth },
+            });
+            return;
+          }
           postMessage("topbar.generate", {
             type: "analyzeActiveFile",
             payload: { traceMode, graphDepth },
@@ -2098,17 +2094,17 @@ export default function App() {
         <CanvasPane
           graph={graph}
           hasData={hasGraphData}
-          activeFilePath={activeFilePath}
+          activeFilePath={graphFilePath}
           activeFilter={activeChip}
           searchQuery={searchQuery}
-          rootNodeId={rootNodeId}
+          rootFilePath={rootFilePath}
           selectedNodeId={selectedNodeId}
           selectedNodeIds={selectedNodeIds}
           onSelectNode={handleCanvasSelectNode}
           onClearSelection={handleCanvasClearSelection}
           onOpenNode={handleCanvasOpenNode}
           onGenerateFromActive={handleGenerateFromActive}
-          onUseSelectionAsRoot={handleUseSelectionAsRoot}
+          onUseSelectedFileAsRoot={handleUseSelectedFileAsRoot}
           onClearRoot={handleClearRoot}
           onExpandExternal={expandExternalFile}
           analysisDiagnostics={analysis?.diagnostics ?? []}
@@ -2184,11 +2180,8 @@ export default function App() {
           }
           onResetGraph={resetGraph}
           onExpandExternal={expandExternalFile}
-          rootNode={findNodeById(graph, rootNodeId)}
-          onClearRoot={() => {
-            setRootNodeId(null);
-            setInspectorNotice(null);
-          }}
+          rootFilePath={rootFilePath}
+          onClearRoot={handleClearRoot}
         />
       </div>
 

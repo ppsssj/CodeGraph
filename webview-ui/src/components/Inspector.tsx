@@ -79,7 +79,7 @@ type Props = {
   onRefreshActive: () => void;
   onResetGraph: () => void;
   onExpandExternal: (filePath: string) => void;
-  rootNode?: GraphNode | null;
+  rootFilePath?: string | null;
   onClearRoot?: () => void;
   collapsed?: boolean;
   width?: number;
@@ -110,7 +110,7 @@ const SECTION_DEFS: Array<{
   summary: string;
 }> = [
   { key: "snapshot", title: "Active File Snapshot", summary: "Current file preview and refresh." },
-  { key: "root", title: "Root", summary: "Current root node and root scope." },
+  { key: "root", title: "Root", summary: "Current graph root file and lock status." },
   { key: "runtime", title: "Runtime Frame", summary: "Debugger frame and key variables." },
   { key: "selected", title: "Selected Node", summary: "Selected graph node details." },
   { key: "selection", title: "Selection", summary: "Current editor selection range and text." },
@@ -427,7 +427,7 @@ export function Inspector({
   onRefreshActive,
   onResetGraph,
   onExpandExternal,
-  rootNode = null,
+  rootFilePath = null,
   onClearRoot,
   collapsed = false,
   width,
@@ -794,32 +794,34 @@ export function Inspector({
         onToggle={() => toggleSection("root")}
         collapseDirection={collapseDirection}
         actions={
-          rootNode && onClearRoot ? (
+          rootFilePath && onClearRoot ? (
             <button className="smallBtn" type="button" onClick={onClearRoot}>
               Clear Root
             </button>
           ) : null
         }
       >
-        {!rootNode ? (
-          <div className="mutedText">No root selected.</div>
+        {!rootFilePath ? (
+          <div className="mutedText">No root file locked.</div>
         ) : (
           <div className="kvList">
             <div className="kvRow">
-              <div className="kvKey mono">kind</div>
-              <div className="kvVal mono">{rootNode.kind}</div>
-            </div>
-            <div className="kvRow">
-              <div className="kvKey mono">name</div>
-              <div className="kvVal mono">{rootNode.name}</div>
+              <div className="kvKey mono">mode</div>
+              <div className="kvVal mono">file lock</div>
             </div>
             <div className="kvRow">
               <div className="kvKey mono">file</div>
-              <div className="kvVal mono">{shortFile(rootNode.file)}</div>
+              <div className="kvVal mono">{shortFile(rootFilePath)}</div>
             </div>
             <div className="kvRow">
-              <div className="kvKey mono">range</div>
-              <div className="kvVal mono">{fmtRange(rootNode)}</div>
+              <div className="kvKey mono">path</div>
+              <div className="kvVal mono">{rootFilePath}</div>
+            </div>
+            <div className="kvRow">
+              <div className="kvKey mono">behavior</div>
+              <div className="kvVal">
+                Keep the graph anchored to this file even when another file is opened.
+              </div>
             </div>
           </div>
         )}

@@ -679,6 +679,14 @@
   gap: 14px;
 }
 
+.inspector--bottom .inspectorSettingsView {
+  min-width: max-content;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
 .inspectorSettingsCard {
   border-radius: 14px;
   border: 1px solid var(--border);
@@ -686,6 +694,16 @@
   padding: 14px;
   display: grid;
   gap: 12px;
+}
+
+.inspector--bottom .inspectorSettingsCard {
+  flex: 0 0 clamp(300px, 28vw, 380px);
+  height: 100%;
+  min-height: 0;
+}
+
+.inspector--bottom .inspectorSettingsCard:last-child {
+  flex-basis: clamp(380px, 34vw, 520px);
 }
 
 .inspectorSettingsCardHeader {
@@ -717,6 +735,11 @@
 .inspectorSectionList {
   display: grid;
   gap: 10px;
+}
+
+.inspector--bottom .inspectorSectionList {
+  min-height: 0;
+  overflow: auto;
 }
 
 .inspectorSectionRow {
