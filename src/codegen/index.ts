@@ -10,6 +10,10 @@ import type {
 
 type FilePatchOperation =
   | {
+      kind: "mkdir";
+      filePath: string;
+    }
+  | {
       kind: "create";
       filePath: string;
       fullText: string;
@@ -30,6 +34,10 @@ type ResolvedDesignNode = DesignNode & {
   resolvedFilePath: string;
 };
 
+type ResolvedFolderNode = DesignNode & {
+  resolvedFolderPath: string;
+};
+
 type BuildPatchPreviewArgs = {
   design: DesignGraph;
   workspaceRoot: string | null;
@@ -48,7 +56,7 @@ export function buildPatchPreview(
   const fileBaseDir = workspaceRoot ?? process.cwd();
   const nodeById = new Map(design.nodes.map((node) => [node.id, node]));
   const resolvedNodes = design.nodes
-    .filter((node) => node.kind !== "file")
+    .filter((node) => node.kind !== "file" && node.kind !== "folder")
     .map((node) =>
       resolveNodeFilePath({
         node,
@@ -61,6 +69,14 @@ export function buildPatchPreview(
     resolvedNodes.map((node) => [node.id, node]),
   );
   const fileNodes = design.nodes.filter((node) => node.kind === "file");
+  const folderNodes = design.nodes
+    .filter((node) => node.kind === "folder")
+    .map((node) =>
+      resolveFolderNodePath({
+        folderNode: node,
+        fileBaseDir,
+      }),
+    );
 
   const assignedFilePaths = new Set(
     fileNodes
@@ -71,6 +87,10 @@ export function buildPatchPreview(
         }),
       )
       .filter(Boolean),
+  );
+
+  const assignedFolderPaths = new Set(
+    folderNodes.map((node) => node.resolvedFolderPath).filter(Boolean),
   );
 
   for (const node of resolvedNodes) {
@@ -95,6 +115,47 @@ export function buildPatchPreview(
   }
 
   const patches: GeneratedPatchPlan[] = [];
+  for (const folderPath of [...assignedFolderPaths].sort()) {
+    if (fs.existsSync(folderPath)) {continue;}
+    patches.push({
+      preview: {
+        id: patchId(folderPath),
+        filePath: folderPath,
+        kind: "mkdir",
+        summary: `Create folder ${path.basename(folderPath)}`,
+        diffText: `mkdir ${folderPath}`,
+      },
+      operation: {
+        kind: "mkdir",
+        filePath: folderPath,
+      },
+    });
+  }
+
+  for (const fileNode of fileNodes) {
+    const filePath = resolveFileNodePath({
+      fileNode,
+      fileBaseDir,
+    });
+    const hasResolvedDeclarations = (nodesByFile.get(filePath) ?? []).length > 0;
+    if (hasResolvedDeclarations || fs.existsSync(filePath)) {continue;}
+    patches.push({
+      preview: {
+        id: patchId(filePath),
+        filePath,
+        kind: "create",
+        summary: `Create empty file ${path.basename(filePath)}`,
+        diffText: buildCreatePreview(filePath, ""),
+        editableContent: "",
+      },
+      operation: {
+        kind: "create",
+        filePath,
+        fullText: "",
+      },
+    });
+  }
+
   for (const filePath of [...assignedFilePaths].sort()) {
     const fileNodesInTarget = nodesByFile.get(filePath) ?? [];
     if (!fileNodesInTarget.length) {continue;}
@@ -283,6 +344,22 @@ function resolveFileNodePath(args: {
     return path.resolve(fileBaseDir, fileNode.name);
   }
   return path.resolve(fileBaseDir, `${toKebabCase(fileNode.name)}.ts`);
+}
+
+function resolveFolderNodePath(args: {
+  folderNode: DesignNode;
+  fileBaseDir: string;
+}): ResolvedFolderNode {
+  const { folderNode, fileBaseDir } = args;
+  const rawPath = folderNode.filePath?.trim() || folderNode.name.trim();
+  const resolvedFolderPath = rawPath
+    ? path.resolve(fileBaseDir, rawPath)
+    : path.resolve(fileBaseDir, toKebabCase(folderNode.name));
+
+  return {
+    ...folderNode,
+    resolvedFolderPath,
+  };
 }
 
 function buildRelationContext(

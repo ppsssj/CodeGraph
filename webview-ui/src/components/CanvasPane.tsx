@@ -105,6 +105,7 @@ type FolderGroupData = {
   count: number;
   collapsed?: boolean;
   transitionState?: "collapsing" | "expanding";
+  onSelect?: () => void;
   onToggleCollapsed?: () => void;
 };
 
@@ -729,6 +730,7 @@ function FolderGroupNode({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          data.onSelect?.();
           data.onToggleCollapsed?.();
         }}
         title={data.collapsed ? "Expand folder group" : "Collapse folder group"}
@@ -1382,6 +1384,7 @@ function toReactFlowNodes(
   ) => void,
   onOpenChildNode?: (nodeId: string) => void,
   onSelectFileGroup?: (nodeId: string) => void,
+  onSelectFolderGroup?: (nodeId: string) => void,
   onToggleFileGroup?: (filePath: string) => void,
   onToggleFolderGroup?: (folderPath: string) => void,
 ): Array<Node<CanvasNodeData>> {
@@ -1569,9 +1572,9 @@ function toReactFlowNodes(
       type: "folderGroup",
       position: { x: folderX, y: folderY },
       draggable: false,
-      selectable: false,
-      focusable: false,
-      selected: folder.hasSelectedDescendant,
+      selectable: true,
+      focusable: true,
+      selected: folder.hasSelectedDescendant || selectedNodeIdSet.has(folderId),
       data: {
         title: folderTitleForPath(folder.folderPath, workspaceRoot),
         subtitle: folderSubtitle.subtitle,
@@ -1581,6 +1584,7 @@ function toReactFlowNodes(
         count: folder.fileGroups.length,
         collapsed: folder.collapsed,
         transitionState: folder.transitionState,
+        onSelect: onSelectFolderGroup ? () => onSelectFolderGroup(folderId) : undefined,
         onToggleCollapsed: onToggleFolderGroup
           ? () => onToggleFolderGroup(folder.folderPath)
           : undefined,
@@ -1929,7 +1933,7 @@ export const CanvasPane = memo(function CanvasPane({
   activeFilePath,
   activeFilter,
   searchQuery,
-  rootFilePath,
+  rootTarget,
   onClearRoot,
   selectedNodeId,
   selectedNodeIds,
@@ -1938,6 +1942,7 @@ export const CanvasPane = memo(function CanvasPane({
   onOpenNode,
   onGenerateFromActive,
   onUseSelectedFileAsRoot,
+  onUseSelectedFolderAsRoot,
   onExpandExternal,
   analysisDiagnostics,
   highlightedNodeIds,
@@ -2460,6 +2465,13 @@ export const CanvasPane = memo(function CanvasPane({
           });
           onSelectNode(nodeId);
         },
+        (nodeId) => {
+          pushWebviewDebugEvent("canvas.folder-group.select", {
+            nodeId,
+            ...getGraphCounts(graph),
+          });
+          onSelectNode(nodeId);
+        },
         handleToggleFileGroup,
         handleToggleFolderGroup,
       ),
@@ -2523,13 +2535,9 @@ export const CanvasPane = memo(function CanvasPane({
     [edges],
   );
   const visibleHasData = nodes.length > 0;
-  const selectedGraphFileNode = useMemo(
-    () => {
-      const node =
-        selectedNodeId ? graph?.nodes.find((graphNode) => graphNode.id === selectedNodeId) ?? null : null;
-      return node?.kind === "file" ? node : null;
-    },
-    [graph, selectedNodeId],
+  const selectedVisibleNode = useMemo(
+    () => (selectedNodeId ? nodes.find((node) => node.id === selectedNodeId) ?? null : null),
+    [nodes, selectedNodeId],
   );
 
   const clearSnapshotTimers = useCallback(() => {
@@ -2585,7 +2593,7 @@ export const CanvasPane = memo(function CanvasPane({
       viewportY: viewport?.y ?? null,
       viewportZoom: viewport?.zoom ?? null,
       selectedNodeId,
-      rootFilePath,
+      rootTarget,
       ...getGraphCounts(graph),
       ...(extra ?? {}),
     };
@@ -2609,7 +2617,7 @@ export const CanvasPane = memo(function CanvasPane({
     hasData,
     nodes.length,
     requestCanvasRecovery,
-    rootFilePath,
+    rootTarget,
     selectedNodeId,
     visibleHasData,
   ]);
@@ -2646,8 +2654,6 @@ export const CanvasPane = memo(function CanvasPane({
       nodeId: node.id,
       visibleKind: node.data.kind,
     });
-    if (node.data?.kind === "folder") return;
-
     setFocusPulseRequest((current) => ({
       nodeId: node.id,
       visibleNodeId: node.id,
@@ -2693,6 +2699,7 @@ export const CanvasPane = memo(function CanvasPane({
     onOpenScaffoldModal?.({
       clientX: event.clientX,
       clientY: event.clientY,
+      targetContext: "canvas",
     });
   };
 
@@ -2716,11 +2723,27 @@ export const CanvasPane = memo(function CanvasPane({
       clientY: event.clientY,
       ...getGraphCounts(graph),
     });
-    if (node.data.kind === "file" || node.data.kind === "folder") return;
-    onSelectNode(node.id);
+    const targetFilePath =
+      node.data.kind === "folder"
+        ? null
+        : "file" in node.data
+          ? node.data.file
+          : graphNode?.file ?? null;
+    const targetFolderPath =
+      node.data.kind === "folder"
+        ? node.data.path
+        : targetFilePath
+          ? folderKeyForFile(targetFilePath)
+          : null;
+    if (node.data.kind !== "folder") {
+      onSelectNode(node.id);
+    }
     onOpenScaffoldModal?.({
       clientX: event.clientX,
       clientY: event.clientY,
+      targetContext: node.data.kind === "folder" ? "folder" : "file",
+      targetFilePath,
+      targetFolderPath,
     });
   };
 
@@ -2784,7 +2807,7 @@ export const CanvasPane = memo(function CanvasPane({
       filteredNodes: filteredGraph?.nodes.length ?? 0,
       filteredEdges: filteredGraph?.edges.length ?? 0,
       selectedNodeId,
-      rootFilePath,
+      rootTarget,
       highlightedEdgeId,
       nodeTopologyKey: shortenTopologyKey(nodeTopologyKey),
       edgeTopologyKey: shortenTopologyKey(edgeTopologyKey),
@@ -2804,7 +2827,7 @@ export const CanvasPane = memo(function CanvasPane({
     nodeTopologyKey,
     nodes.length,
     edges.length,
-    rootFilePath,
+    rootTarget,
     selectedNodeId,
     visibleHasData,
   ]);
@@ -3121,10 +3144,10 @@ export const CanvasPane = memo(function CanvasPane({
               </div>
 
               {/* Root bar (kept; currently not applied to layout in this file) */}
-              {rootFilePath ? (
+              {rootTarget ? (
                 <div className="rootBanner canvasOverlay">
                   <div className="rootText">
-                    Root file: <b>{baseName(rootFilePath)}</b>
+                    Root {rootTarget.kind}: <b>{baseName(rootTarget.path)}</b>
                   </div>
                   <button className="btnGhost" onClick={onClearRoot}>
                     Clear root
@@ -3153,11 +3176,20 @@ export const CanvasPane = memo(function CanvasPane({
               </div>
 
               {/* Selection actions */}
-              {selectedGraphFileNode?.file ? (
+              {selectedVisibleNode?.data.kind === "file" || selectedVisibleNode?.data.kind === "folder" ? (
                 <div className="selectionBanner canvasOverlay">
-                  <button className="btnGhost" onClick={onUseSelectedFileAsRoot}>
-                    Use selected file as root
-                  </button>
+                  {selectedVisibleNode?.data.kind === "file" ? (
+                    <button className="btnGhost" onClick={onUseSelectedFileAsRoot}>
+                      Use selected file as root
+                    </button>
+                  ) : (
+                    <button
+                      className="btnGhost"
+                      onClick={() => onUseSelectedFolderAsRoot((selectedVisibleNode.data as FolderGroupData).path)}
+                    >
+                      Use selected folder as root
+                    </button>
+                  )}
                 </div>
               ) : null}
 
@@ -3204,7 +3236,12 @@ type Props = {
   activeFilePath?: string | null;
   activeFilter: ChipKey[];
   searchQuery: string;
-  rootFilePath: string | null;
+  rootTarget:
+    | {
+        kind: "file" | "folder";
+        path: string;
+      }
+    | null;
   onClearRoot: () => void;
 
   selectedNodeId: string | null;
@@ -3216,6 +3253,7 @@ type Props = {
 
   onGenerateFromActive: () => void;
   onUseSelectedFileAsRoot: () => void;
+  onUseSelectedFolderAsRoot: (folderPath: string) => void;
 
   onExpandExternal?: (filePath: string) => void;
   analysisDiagnostics?: CodeDiagnostic[];
@@ -3238,5 +3276,8 @@ type Props = {
   onOpenScaffoldModal?: (args: {
     clientX: number;
     clientY: number;
+    targetContext?: "canvas" | "file" | "folder";
+    targetFilePath?: string | null;
+    targetFolderPath?: string | null;
   }) => void;
 };

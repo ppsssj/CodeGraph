@@ -20,8 +20,8 @@ export type WebviewToExtMessage =
       payload: { filePath: string; graphDepth?: number };
     }
   | {
-      type: "setGraphRootFile";
-      payload: { filePath: string | null };
+      type: "setGraphRoot";
+      payload: { root: { kind: "file" | "folder"; path: string } | null };
     }
   | { type: "expandNode"; payload: { filePath: string; generation?: number } }
   | { type: "setGraphDepth"; payload: { graphDepth: number } }
@@ -149,7 +149,13 @@ export type GraphPayload = {
   edges: GraphEdge[];
 };
 
-export type DesignNodeKind = "file" | "function" | "class" | "interface" | "type";
+export type DesignNodeKind =
+  | "file"
+  | "folder"
+  | "function"
+  | "class"
+  | "interface"
+  | "type";
 
 export type DesignNode = {
   id: string;
@@ -192,7 +198,7 @@ export type DesignGraph = {
 export type PatchPreview = {
   id: string;
   filePath: string;
-  kind: "create" | "update";
+  kind: "create" | "update" | "mkdir";
   summary: string;
   diffText: string;
   editableContent?: string;

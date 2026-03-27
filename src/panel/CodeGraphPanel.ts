@@ -28,6 +28,10 @@ function normalizeComparablePath(filePath: string) {
   return filePath.replace(/\\/g, "/").toLowerCase();
 }
 
+function normalizeDirectoryPath(filePath: string) {
+  return normalizeComparablePath(path.dirname(filePath));
+}
+
 function clampGraphDepth(depth: number | undefined) {
   if (!Number.isFinite(depth)) {return 0;}
   return Math.max(0, Math.min(3, Math.round(depth ?? 0)));
@@ -110,9 +114,10 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
       graphDepth: msg.payload.graphDepth ?? null,
     };
   }
-  if (msg.type === "setGraphRootFile") {
+  if (msg.type === "setGraphRoot") {
     return {
-      filePath: msg.payload.filePath,
+      rootKind: msg.payload.root?.kind ?? null,
+      path: msg.payload.root?.path ?? null,
     };
   }
   if (msg.type === "analyzeActiveFile") {
@@ -151,7 +156,12 @@ export class CodeGraphPanel {
   private lastSelection: vscode.Selection | undefined;
   private analysisTimer: NodeJS.Timeout | undefined;
   private readonly suppressedAutoAnalysisUris = new Map<string, number>();
-  private graphRootFilePath: string | null = null;
+  private graphRoot:
+    | {
+        kind: "file" | "folder";
+        path: string;
+      }
+    | null = null;
   private analysisGeneration = 0;
   private analysisSequence = 0;
   private latestActiveAnalysisSequence = 0;
@@ -318,8 +328,8 @@ export class CodeGraphPanel {
             }
             return await this.selectWorkspaceFile(msg.payload.filePath);
           }
-          if (msg.type === "setGraphRootFile") {
-            this.graphRootFilePath = msg.payload.filePath;
+          if (msg.type === "setGraphRoot") {
+            this.graphRoot = msg.payload.root;
             return;
           }
           if (msg.type === "setGraphDepth") {
@@ -415,14 +425,10 @@ export class CodeGraphPanel {
         return;
       }
 
-      if (
-        this.graphRootFilePath &&
-        normalizeComparablePath(editor.document.fileName) !==
-          normalizeComparablePath(this.graphRootFilePath)
-      ) {
+      if (!this.matchesGraphRoot(editor.document.fileName)) {
         pushPanelDebugEvent("analysis.auto.skipped.graph-root-lock", {
           filePath: editor.document.fileName,
-          graphRootFilePath: this.graphRootFilePath,
+          graphRoot: this.graphRoot,
         });
         return;
       }
@@ -444,14 +450,10 @@ export class CodeGraphPanel {
         return;
       }
 
-      if (
-        this.graphRootFilePath &&
-        normalizeComparablePath(active.fileName) !==
-          normalizeComparablePath(this.graphRootFilePath)
-      ) {
+      if (!this.matchesGraphRoot(active.fileName)) {
         pushPanelDebugEvent("analysis.auto.skipped.document-change.graph-root-lock", {
           filePath: active.fileName,
-          graphRootFilePath: this.graphRootFilePath,
+          graphRoot: this.graphRoot,
         });
         this.postActiveFile();
         return;
@@ -472,14 +474,10 @@ export class CodeGraphPanel {
         return;
       }
 
-      if (
-        this.graphRootFilePath &&
-        normalizeComparablePath(active.fileName) !==
-          normalizeComparablePath(this.graphRootFilePath)
-      ) {
+      if (!this.matchesGraphRoot(active.fileName)) {
         pushPanelDebugEvent("analysis.auto.skipped.save.graph-root-lock", {
           filePath: active.fileName,
-          graphRootFilePath: this.graphRootFilePath,
+          graphRoot: this.graphRoot,
         });
         return;
       }
@@ -603,6 +601,18 @@ export class CodeGraphPanel {
     }
 
     return true;
+  }
+
+  private matchesGraphRoot(filePath: string) {
+    if (!this.graphRoot) {
+      return true;
+    }
+
+    if (this.graphRoot.kind === "file") {
+      return normalizeComparablePath(filePath) === normalizeComparablePath(this.graphRoot.path);
+    }
+
+    return normalizeDirectoryPath(filePath) === normalizeComparablePath(this.graphRoot.path);
   }
 
   private beginActiveAnalysis(reason: AnalysisRequestReason): AnalysisRequestMeta {
@@ -1355,12 +1365,26 @@ export class CodeGraphPanel {
       const operation = editedContent
         ? applyEditedContent(plan, editedContent)
         : plan.operation;
-      const uri = vscode.Uri.file(plan.operation.filePath);
+      const uri = vscode.Uri.file(operation.filePath);
+
+      if (operation.kind === "mkdir") {
+        await vscode.workspace.fs.createDirectory(uri);
+        appliedFiles.push(operation.filePath);
+        continue;
+      }
 
       if (operation.kind === "create") {
+        const parentDir = path.dirname(operation.filePath);
+        if (parentDir && parentDir !== "." && parentDir !== operation.filePath) {
+          await vscode.workspace.fs.createDirectory(vscode.Uri.file(parentDir));
+        }
         edit.createFile(uri, { overwrite: false, ignoreIfExists: false });
         edit.insert(uri, new vscode.Position(0, 0), operation.fullText);
         appliedFiles.push(operation.filePath);
+        continue;
+      }
+
+      if (operation.kind !== "update") {
         continue;
       }
 
@@ -1402,6 +1426,9 @@ function applyEditedContent(
   editedContent: string,
 ): GeneratedPatchPlan["operation"] {
   const normalized = editedContent.replace(/\r\n/g, "\n").trimEnd();
+  if (plan.operation.kind === "mkdir") {
+    return plan.operation;
+  }
   if (plan.operation.kind === "create") {
     return {
       ...plan.operation,

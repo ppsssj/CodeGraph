@@ -79,7 +79,7 @@
   box-shadow:
     0 0 0 0 color-mix(in srgb, var(--accent) 32%, transparent),
     0 0 20px color-mix(in srgb, var(--accent) 22%, transparent);
-  pointer-events: none;
+  pointer-events: auto;
   animation: cgNodeFocusPulse 900ms ease-out forwards;
 }
 
@@ -181,7 +181,7 @@
   opacity: 0;
   transform: translateY(-10px) scale(0.97);
   filter: saturate(0.8);
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .cgNode--expanding {

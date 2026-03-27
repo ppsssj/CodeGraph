@@ -170,6 +170,11 @@ function shortBaseName(p: string) {
   const parts = norm.split("/");
   return parts[parts.length - 1] || p;
 }
+function dirName(p: string) {
+  const norm = normalizePath(p);
+  const idx = norm.lastIndexOf("/");
+  return idx >= 0 ? norm.slice(0, idx) : norm;
+}
 function normalizeComparablePath(p: string) {
   return normalizePath(p).toLowerCase();
 }
@@ -502,10 +507,25 @@ type ScaffoldPanelSize = {
   height: number;
 };
 type ScaffoldPanelLayout = ScaffoldPanelPosition & ScaffoldPanelSize;
+type ScaffoldContextKind = "canvas" | "file" | "folder";
 type OpenScaffoldPanelArgs = {
   clientX: number;
   clientY: number;
+  targetContext?: ScaffoldContextKind;
+  targetFilePath?: string | null;
+  targetFolderPath?: string | null;
 };
+type ScaffoldTargetContext = {
+  targetContext: ScaffoldContextKind;
+  targetFilePath: string | null;
+  targetFolderPath: string | null;
+};
+type GraphRootTarget =
+  | {
+      kind: "file" | "folder";
+      path: string;
+    }
+  | null;
 type ScaffoldPreviewState = {
   requestId: string | null;
   patches: PatchPreview[];
@@ -565,6 +585,11 @@ export default function App() {
   const [scaffoldPreviewBusy, setScaffoldPreviewBusy] = useState(false);
   const [scaffoldApplyBusy, setScaffoldApplyBusy] = useState(false);
   const [scaffoldModalOpen, setScaffoldModalOpen] = useState(false);
+  const [scaffoldTargetContext, setScaffoldTargetContext] = useState<ScaffoldTargetContext>({
+    targetContext: "canvas",
+    targetFilePath: null,
+    targetFolderPath: null,
+  });
   const [scaffoldPanelPosition, setScaffoldPanelPosition] =
     useState<ScaffoldPanelPosition>({ left: 24, top: 96 });
   const [scaffoldPanelSize, setScaffoldPanelSize] = useState<ScaffoldPanelSize>({
@@ -588,7 +613,7 @@ export default function App() {
   const [isResizingScaffoldPanel, setIsResizingScaffoldPanel] = useState(false);
   const [scaffoldPanelInactive, setScaffoldPanelInactive] = useState(false);
 
-  const [rootFilePath, setRootFilePath] = useState<string | null>(null);
+  const [rootTarget, setRootTarget] = useState<GraphRootTarget>(null);
 
   // Inspector UI
   const LS_INSPECTOR_OPEN = "cg.inspector.open";
@@ -832,6 +857,29 @@ export default function App() {
 
   const openScaffoldPanelAt = useCallback((args: OpenScaffoldPanelArgs) => {
     const appRect = getScaffoldAppRect();
+    const activeContextFilePath = activeFile ? uriToFsPath(activeFile.uri) : null;
+    const workspaceRootPath = workspaceFiles?.rootPath ?? null;
+    const resolvedTargetContext: ScaffoldContextKind = rootTarget?.kind ??
+      args.targetContext ??
+      "canvas";
+    const resolvedTargetFilePath =
+      rootTarget?.kind === "file"
+        ? rootTarget.path
+        : args.targetFilePath ?? activeContextFilePath;
+    const resolvedTargetFolderPath = rootTarget?.kind === "folder"
+      ? rootTarget.path
+      : rootTarget?.kind === "file"
+        ? dirName(rootTarget.path)
+      : args.targetFolderPath ??
+        (args.targetFilePath ? dirName(args.targetFilePath) : null) ??
+        workspaceRootPath ??
+        (activeContextFilePath ? dirName(activeContextFilePath) : null);
+
+    setScaffoldTargetContext({
+      targetContext: resolvedTargetContext,
+      targetFilePath: resolvedTargetFilePath,
+      targetFolderPath: resolvedTargetFolderPath,
+    });
     setScaffoldPanelInactive(false);
     if (!appRect) {
       setScaffoldModalOpen(true);
@@ -854,7 +902,7 @@ export default function App() {
       }),
     );
     setScaffoldModalOpen(true);
-  }, []);
+  }, [activeFile, rootTarget, workspaceFiles]);
 
   const graphRef = useRef<GraphPayload | undefined>(undefined);
   const activeGraphGenerationRef = useRef(-1);
@@ -998,7 +1046,7 @@ export default function App() {
             clearSelectedNodes();
             setFocusedFlow(null);
             setInspectorFocusRequest(null);
-            syncGraphRootFile(null);
+            syncGraphRoot(null);
             setCanvasNotice(null);
             return;
           }
@@ -1466,19 +1514,32 @@ export default function App() {
   }, []);
 
   const activeFilePath = activeFile ? uriToFsPath(activeFile.uri) : null;
+  const rootFilePath = rootTarget?.kind === "file" ? rootTarget.path : null;
+  const rootFolderPath = rootTarget?.kind === "folder" ? rootTarget.path : null;
   const graphFilePath = rootFilePath ?? activeFilePath;
   const workspaceRoot = workspaceFiles?.rootPath ?? null;
+  const scaffoldTargetFilePath =
+    rootFilePath ?? scaffoldTargetContext.targetFilePath ?? activeFilePath;
+  const scaffoldTargetFolderPath = rootFolderPath
+    ? rootFolderPath
+    : rootFilePath
+      ? dirName(rootFilePath)
+    : scaffoldTargetContext.targetFolderPath ??
+      workspaceRoot ??
+      (scaffoldTargetFilePath ? dirName(scaffoldTargetFilePath) : null);
+  const scaffoldTargetKind: ScaffoldContextKind = rootTarget?.kind ??
+    scaffoldTargetContext.targetContext;
   const projectName = graphFilePath ? shortBaseName(graphFilePath) : "Select file";
   const exportBaseName =
     shortBaseName(graphFilePath ?? activeFile?.fileName ?? "codegraph")
       .replace(/[^\w.-]+/g, "_")
       .slice(0, 64) || "codegraph";
 
-  const syncGraphRootFile = useCallback((filePath: string | null) => {
-    setRootFilePath(filePath);
+  const syncGraphRoot = useCallback((nextRoot: GraphRootTarget) => {
+    setRootTarget(nextRoot);
     postMessage("app.graphRoot.sync", {
-      type: "setGraphRootFile",
-      payload: { filePath },
+      type: "setGraphRoot",
+      payload: { root: nextRoot },
     });
   }, [postMessage]);
 
@@ -1516,9 +1577,9 @@ export default function App() {
     clearSelectedNodes();
     setFocusedFlow(null);
     setInspectorFocusRequest(null);
-    syncGraphRootFile(null);
+    syncGraphRoot(null);
     setInspectorNotice(null);
-  }, [clearSelectedNodes, syncGraphRootFile]);
+  }, [clearSelectedNodes, syncGraphRoot]);
 
   const stepTraceTo = useCallback((nextCursor: number) => {
     if (!traceEvents || traceEvents.length === 0) return;
@@ -1687,7 +1748,7 @@ export default function App() {
       return;
     }
     const nextRootFilePath = selectedNode.file;
-    syncGraphRootFile(nextRootFilePath);
+    syncGraphRoot({ kind: "file", path: nextRootFilePath });
     setInspectorNotice(null);
     if (normalizeComparablePath(nextRootFilePath) === normalizeComparablePath(graphFilePath ?? "")) {
       return;
@@ -1715,13 +1776,32 @@ export default function App() {
     graphFilePath,
     postMessage,
     selectedNode,
-    syncGraphRootFile,
+    syncGraphRoot,
   ]);
 
-  const handleClearRoot = useCallback(() => {
-    syncGraphRootFile(null);
+  const handleUseSelectedFolderAsRoot = useCallback((folderPath: string) => {
+    if (!folderPath) {
+      return;
+    }
+    syncGraphRoot({ kind: "folder", path: folderPath });
     setInspectorNotice(null);
-  }, [syncGraphRootFile]);
+    if (activeFilePath && normalizeComparablePath(dirName(activeFilePath)) === normalizeComparablePath(folderPath)) {
+      resetGraph();
+      beginAnalysisLoading(
+        `Locking graph to ${shortBaseName(folderPath)}...`,
+        `Rebuilding the graph with ${describeDepth(graphDepth)}.`,
+      );
+      postMessage("canvas.useSelectedFolderAsRoot", {
+        type: "analyzeActiveFile",
+        payload: { traceMode: false, graphDepth },
+      });
+    }
+  }, [activeFilePath, beginAnalysisLoading, graphDepth, postMessage, resetGraph, syncGraphRoot]);
+
+  const handleClearRoot = useCallback(() => {
+    syncGraphRoot(null);
+    setInspectorNotice(null);
+  }, [syncGraphRoot]);
 
   const activateGraphNode = (nodeId: string) => {
     setFocusedFlow(null);
@@ -1823,7 +1903,7 @@ export default function App() {
         activeFilter: activeChip,
         graphDepth,
         searchQuery,
-        rootFilePath,
+        rootTarget,
         selectedNodeId,
         selectedNodeIds,
         inspector: {
@@ -2005,7 +2085,7 @@ export default function App() {
         activeFilePath={graphFilePath}
         onPickFile={(filePath) => {
           resetGraph();
-          syncGraphRootFile(filePath);
+          syncGraphRoot({ kind: "file", path: filePath });
           beginAnalysisLoading(
             `Loading ${shortBaseName(filePath)}...`,
             `Building the graph with ${describeDepth(graphDepth)}.`,
@@ -2023,7 +2103,7 @@ export default function App() {
           if (traceMode) {return;}
           resetGraph();
           if (graphFilePath) {
-            syncGraphRootFile(graphFilePath);
+            syncGraphRoot({ kind: "file", path: graphFilePath });
           }
           beginAnalysisLoading(
             "Rebuilding graph...",
@@ -2050,7 +2130,7 @@ export default function App() {
         onGenerate={() => {
           resetGraph();
           if (!traceMode && graphFilePath) {
-            syncGraphRootFile(graphFilePath);
+            syncGraphRoot({ kind: "file", path: graphFilePath });
           }
           beginAnalysisLoading(
             traceMode ? "Loading trace graph..." : "Rendering graph...",
@@ -2097,7 +2177,7 @@ export default function App() {
           activeFilePath={graphFilePath}
           activeFilter={activeChip}
           searchQuery={searchQuery}
-          rootFilePath={rootFilePath}
+          rootTarget={rootTarget}
           selectedNodeId={selectedNodeId}
           selectedNodeIds={selectedNodeIds}
           onSelectNode={handleCanvasSelectNode}
@@ -2105,6 +2185,7 @@ export default function App() {
           onOpenNode={handleCanvasOpenNode}
           onGenerateFromActive={handleGenerateFromActive}
           onUseSelectedFileAsRoot={handleUseSelectedFileAsRoot}
+          onUseSelectedFolderAsRoot={handleUseSelectedFolderAsRoot}
           onClearRoot={handleClearRoot}
           onExpandExternal={expandExternalFile}
           analysisDiagnostics={analysis?.diagnostics ?? []}
@@ -2180,7 +2261,7 @@ export default function App() {
           }
           onResetGraph={resetGraph}
           onExpandExternal={expandExternalFile}
-          rootFilePath={rootFilePath}
+          rootTarget={rootTarget}
           onClearRoot={handleClearRoot}
         />
       </div>
@@ -2231,7 +2312,9 @@ export default function App() {
 
           <div className="scaffoldFloatingBody">
             <ScaffoldLab
-              appendTargetFilePath={activeFilePath}
+              targetContext={scaffoldTargetKind}
+              targetFilePath={scaffoldTargetFilePath}
+              targetFolderPath={scaffoldTargetFolderPath}
               workspaceRoot={workspaceRoot}
               previewState={scaffoldPreview}
               isPreviewBusy={scaffoldPreviewBusy}

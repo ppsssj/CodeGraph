@@ -79,7 +79,12 @@ type Props = {
   onRefreshActive: () => void;
   onResetGraph: () => void;
   onExpandExternal: (filePath: string) => void;
-  rootFilePath?: string | null;
+  rootTarget?:
+    | {
+        kind: "file" | "folder";
+        path: string;
+      }
+    | null;
   onClearRoot?: () => void;
   collapsed?: boolean;
   width?: number;
@@ -427,7 +432,7 @@ export function Inspector({
   onRefreshActive,
   onResetGraph,
   onExpandExternal,
-  rootFilePath = null,
+  rootTarget = null,
   onClearRoot,
   collapsed = false,
   width,
@@ -794,33 +799,35 @@ export function Inspector({
         onToggle={() => toggleSection("root")}
         collapseDirection={collapseDirection}
         actions={
-          rootFilePath && onClearRoot ? (
+          rootTarget && onClearRoot ? (
             <button className="smallBtn" type="button" onClick={onClearRoot}>
               Clear Root
             </button>
           ) : null
         }
       >
-        {!rootFilePath ? (
+        {!rootTarget ? (
           <div className="mutedText">No root file locked.</div>
         ) : (
           <div className="kvList">
             <div className="kvRow">
               <div className="kvKey mono">mode</div>
-              <div className="kvVal mono">file lock</div>
+              <div className="kvVal mono">{rootTarget.kind} lock</div>
             </div>
             <div className="kvRow">
-              <div className="kvKey mono">file</div>
-              <div className="kvVal mono">{shortFile(rootFilePath)}</div>
+              <div className="kvKey mono">{rootTarget.kind}</div>
+              <div className="kvVal mono">{shortFile(rootTarget.path)}</div>
             </div>
             <div className="kvRow">
               <div className="kvKey mono">path</div>
-              <div className="kvVal mono">{rootFilePath}</div>
+              <div className="kvVal mono">{rootTarget.path}</div>
             </div>
             <div className="kvRow">
               <div className="kvKey mono">behavior</div>
               <div className="kvVal">
-                Keep the graph anchored to this file even when another file is opened.
+                {rootTarget.kind === "file"
+                  ? "Keep the graph anchored to this file even when another file is opened."
+                  : "Allow graph refreshes only for files inside this folder."}
               </div>
             </div>
           </div>
