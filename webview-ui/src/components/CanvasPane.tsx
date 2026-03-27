@@ -108,6 +108,15 @@ type FolderGroupData = {
 };
 
 type CanvasNodeData = CodeNodeData | FileGroupData | FolderGroupData;
+type CollapseLayoutState = {
+  key: string;
+  collapsedFilePaths: string[];
+  collapsingFilePaths: string[];
+  expandingFilePaths: string[];
+  collapsedFolderPaths: string[];
+  collapsingFolderPaths: string[];
+  expandingFolderPaths: string[];
+};
 
 type NodeWithAbsolutePosition = Node<CanvasNodeData> & {
   positionAbsolute?: { x: number; y: number };
@@ -1960,16 +1969,20 @@ export const CanvasPane = memo(function CanvasPane({
     visibleNodeId: string;
     token: number;
   } | null>(null);
+  const handledGroupFollowTokenRef = useRef<number>(0);
   const [groupFollowRequest, setGroupFollowRequest] = useState<{
     nodeId: string;
     token: number;
   } | null>(null);
-  const [collapsedFilePaths, setCollapsedFilePaths] = useState<string[]>([]);
-  const [collapsingFilePaths, setCollapsingFilePaths] = useState<string[]>([]);
-  const [expandingFilePaths, setExpandingFilePaths] = useState<string[]>([]);
-  const [collapsedFolderPaths, setCollapsedFolderPaths] = useState<string[]>([]);
-  const [collapsingFolderPaths, setCollapsingFolderPaths] = useState<string[]>([]);
-  const [expandingFolderPaths, setExpandingFolderPaths] = useState<string[]>([]);
+  const [layoutState, setLayoutState] = useState<CollapseLayoutState>({
+    key: "",
+    collapsedFilePaths: [],
+    collapsingFilePaths: [],
+    expandingFilePaths: [],
+    collapsedFolderPaths: [],
+    collapsingFolderPaths: [],
+    expandingFolderPaths: [],
+  });
   const filteredGraph = useMemo(
     () => filterGraph(graph, activeFilter),
     [graph, activeFilter],
@@ -1989,6 +2002,66 @@ export const CanvasPane = memo(function CanvasPane({
   const activeFileKey = useMemo(
     () => (activeFilePath ? normalizePath(activeFilePath) : null),
     [activeFilePath],
+  );
+  const visibleFilePaths = useMemo(
+    () => [...visibleFilePathSet].sort((a, b) => a.localeCompare(b)),
+    [visibleFilePathSet],
+  );
+  const visibleFolderPaths = useMemo(
+    () => [...visibleFolderPathSet].sort((a, b) => a.localeCompare(b)),
+    [visibleFolderPathSet],
+  );
+  const layoutStateKey = useMemo(
+    () =>
+      JSON.stringify({
+        hasGraph: Boolean(filteredGraph),
+        activeFileKey,
+        activeFolderPath,
+        visibleFilePaths,
+        visibleFolderPaths,
+      }),
+    [activeFileKey, activeFolderPath, filteredGraph, visibleFilePaths, visibleFolderPaths],
+  );
+  const defaultLayoutState = useMemo<CollapseLayoutState>(
+    () => ({
+      key: layoutStateKey,
+      collapsedFilePaths: filteredGraph
+        ? visibleFilePaths.filter((filePath) => filePath !== activeFileKey)
+        : [],
+      collapsingFilePaths: [],
+      expandingFilePaths: [],
+      collapsedFolderPaths: filteredGraph
+        ? visibleFolderPaths.filter((folderPath) => folderPath !== activeFolderPath)
+        : [],
+      collapsingFolderPaths: [],
+      expandingFolderPaths: [],
+    }),
+    [
+      activeFileKey,
+      activeFolderPath,
+      filteredGraph,
+      layoutStateKey,
+      visibleFilePaths,
+      visibleFolderPaths,
+    ],
+  );
+  const effectiveLayoutState =
+    layoutState.key === layoutStateKey ? layoutState : defaultLayoutState;
+  const {
+    collapsedFilePaths,
+    collapsingFilePaths,
+    expandingFilePaths,
+    collapsedFolderPaths,
+    collapsingFolderPaths,
+    expandingFolderPaths,
+  } = effectiveLayoutState;
+  const updateLayoutState = useCallback(
+    (updater: (current: CollapseLayoutState) => CollapseLayoutState) => {
+      setLayoutState((current) =>
+        updater(current.key === layoutStateKey ? current : defaultLayoutState),
+      );
+    },
+    [defaultLayoutState, layoutStateKey],
   );
   const collapsedFilePathSet = useMemo(() => {
     if (!filteredGraph) return new Set<string>();
@@ -2040,45 +2113,22 @@ export const CanvasPane = memo(function CanvasPane({
   const folderGroupIdByFile = useMemo(() => buildFolderGroupIdByFile(graph), [graph]);
 
   useEffect(() => {
-    if (!filteredGraph) {
-      setCollapsedFilePaths([]);
-      setCollapsingFilePaths([]);
-      setExpandingFilePaths([]);
-      setCollapsedFolderPaths([]);
-      setCollapsingFolderPaths([]);
-      setExpandingFolderPaths([]);
-      return;
-    }
-
-    const nextCollapsedFiles = [...visibleFilePathSet]
-      .filter((filePath) => filePath !== activeFileKey)
-      .sort((a, b) => a.localeCompare(b));
-    const nextCollapsedFolders = [...visibleFolderPathSet]
-      .filter((folderPath) => folderPath !== activeFolderPath)
-      .sort((a, b) => a.localeCompare(b));
-
-    setCollapsedFilePaths(nextCollapsedFiles);
-    setCollapsingFilePaths([]);
-    setExpandingFilePaths([]);
-    setCollapsedFolderPaths(nextCollapsedFolders);
-    setCollapsingFolderPaths([]);
-    setExpandingFolderPaths([]);
-  }, [activeFileKey, activeFolderPath, filteredGraph, visibleFilePathSet, visibleFolderPathSet]);
-
-  useEffect(() => {
     if (!collapsingFilePaths.length) return;
 
     const timerIds = collapsingFilePaths.map((filePath) =>
       window.setTimeout(() => {
         const normalized = normalizePath(filePath);
-        setCollapsingFilePaths((current) =>
-          current.filter((item) => normalizePath(item) !== normalized),
-        );
-        setCollapsedFilePaths((current) =>
-          current.some((item) => normalizePath(item) === normalized)
-            ? current
-            : [...current, normalized],
-        );
+        updateLayoutState((current) => ({
+          ...current,
+          collapsingFilePaths: current.collapsingFilePaths.filter(
+            (item) => normalizePath(item) !== normalized,
+          ),
+          collapsedFilePaths: current.collapsedFilePaths.some(
+            (item) => normalizePath(item) === normalized,
+          )
+            ? current.collapsedFilePaths
+            : [...current.collapsedFilePaths, normalized],
+        }));
       }, 180),
     );
 
@@ -2087,7 +2137,7 @@ export const CanvasPane = memo(function CanvasPane({
         window.clearTimeout(timerId);
       }
     };
-  }, [collapsingFilePaths]);
+  }, [collapsingFilePaths, updateLayoutState]);
 
   useEffect(() => {
     if (!expandingFilePaths.length) return;
@@ -2095,9 +2145,12 @@ export const CanvasPane = memo(function CanvasPane({
     const timerIds = expandingFilePaths.map((filePath) =>
       window.setTimeout(() => {
         const normalized = normalizePath(filePath);
-        setExpandingFilePaths((current) =>
-          current.filter((item) => normalizePath(item) !== normalized),
-        );
+        updateLayoutState((current) => ({
+          ...current,
+          expandingFilePaths: current.expandingFilePaths.filter(
+            (item) => normalizePath(item) !== normalized,
+          ),
+        }));
       }, 220),
     );
 
@@ -2106,19 +2159,22 @@ export const CanvasPane = memo(function CanvasPane({
         window.clearTimeout(timerId);
       }
     };
-  }, [expandingFilePaths]);
+  }, [expandingFilePaths, updateLayoutState]);
 
   useEffect(() => {
     if (!collapsingFolderPaths.length) return;
 
     const timerIds = collapsingFolderPaths.map((folderPath) =>
       window.setTimeout(() => {
-        setCollapsingFolderPaths((current) =>
-          current.filter((item) => item !== folderPath),
-        );
-        setCollapsedFolderPaths((current) =>
-          current.includes(folderPath) ? current : [...current, folderPath],
-        );
+        updateLayoutState((current) => ({
+          ...current,
+          collapsingFolderPaths: current.collapsingFolderPaths.filter(
+            (item) => item !== folderPath,
+          ),
+          collapsedFolderPaths: current.collapsedFolderPaths.includes(folderPath)
+            ? current.collapsedFolderPaths
+            : [...current.collapsedFolderPaths, folderPath],
+        }));
       }, 180),
     );
 
@@ -2127,16 +2183,19 @@ export const CanvasPane = memo(function CanvasPane({
         window.clearTimeout(timerId);
       }
     };
-  }, [collapsingFolderPaths]);
+  }, [collapsingFolderPaths, updateLayoutState]);
 
   useEffect(() => {
     if (!expandingFolderPaths.length) return;
 
     const timerIds = expandingFolderPaths.map((folderPath) =>
       window.setTimeout(() => {
-        setExpandingFolderPaths((current) =>
-          current.filter((item) => item !== folderPath),
-        );
+        updateLayoutState((current) => ({
+          ...current,
+          expandingFolderPaths: current.expandingFolderPaths.filter(
+            (item) => item !== folderPath,
+          ),
+        }));
       }, 220),
     );
 
@@ -2145,7 +2204,7 @@ export const CanvasPane = memo(function CanvasPane({
         window.clearTimeout(timerId);
       }
     };
-  }, [expandingFolderPaths]);
+  }, [expandingFolderPaths, updateLayoutState]);
 
   const handleToggleFileGroup = useCallback(
     (filePath: string) => {
@@ -2160,30 +2219,41 @@ export const CanvasPane = memo(function CanvasPane({
       }));
 
       if (isCollapsed || isCollapsing) {
-        setCollapsedFilePaths((current) =>
-          current.filter((item) => normalizePath(item) !== normalized),
-        );
-        setCollapsingFilePaths((current) =>
-          current.filter((item) => normalizePath(item) !== normalized),
-        );
-        setExpandingFilePaths((current) =>
-          current.some((item) => normalizePath(item) === normalized)
-            ? current
-            : [...current, normalized],
-        );
+        updateLayoutState((current) => ({
+          ...current,
+          collapsedFilePaths: current.collapsedFilePaths.filter(
+            (item) => normalizePath(item) !== normalized,
+          ),
+          collapsingFilePaths: current.collapsingFilePaths.filter(
+            (item) => normalizePath(item) !== normalized,
+          ),
+          expandingFilePaths: current.expandingFilePaths.some(
+            (item) => normalizePath(item) === normalized,
+          )
+            ? current.expandingFilePaths
+            : [...current.expandingFilePaths, normalized],
+        }));
         return;
       }
 
-      setExpandingFilePaths((current) =>
-        current.filter((item) => normalizePath(item) !== normalized),
-      );
-      setCollapsingFilePaths((current) =>
-        current.some((item) => normalizePath(item) === normalized)
-          ? current
-          : [...current, normalized],
-      );
+      updateLayoutState((current) => ({
+        ...current,
+        expandingFilePaths: current.expandingFilePaths.filter(
+          (item) => normalizePath(item) !== normalized,
+        ),
+        collapsingFilePaths: current.collapsingFilePaths.some(
+          (item) => normalizePath(item) === normalized,
+        )
+          ? current.collapsingFilePaths
+          : [...current.collapsingFilePaths, normalized],
+      }));
     },
-    [collapsedFilePathSet, collapsingFilePathSet, fileGroupIdByFile],
+    [
+      collapsedFilePathSet,
+      collapsingFilePathSet,
+      fileGroupIdByFile,
+      updateLayoutState,
+    ],
   );
 
   const handleToggleFolderGroup = useCallback(
@@ -2197,20 +2267,32 @@ export const CanvasPane = memo(function CanvasPane({
       }));
 
       if (isCollapsed || isCollapsing) {
-        setCollapsedFolderPaths((current) => current.filter((item) => item !== folderPath));
-        setCollapsingFolderPaths((current) => current.filter((item) => item !== folderPath));
-        setExpandingFolderPaths((current) =>
-          current.includes(folderPath) ? current : [...current, folderPath],
-        );
+        updateLayoutState((current) => ({
+          ...current,
+          collapsedFolderPaths: current.collapsedFolderPaths.filter(
+            (item) => item !== folderPath,
+          ),
+          collapsingFolderPaths: current.collapsingFolderPaths.filter(
+            (item) => item !== folderPath,
+          ),
+          expandingFolderPaths: current.expandingFolderPaths.includes(folderPath)
+            ? current.expandingFolderPaths
+            : [...current.expandingFolderPaths, folderPath],
+        }));
         return;
       }
 
-      setExpandingFolderPaths((current) => current.filter((item) => item !== folderPath));
-      setCollapsingFolderPaths((current) =>
-        current.includes(folderPath) ? current : [...current, folderPath],
-      );
+      updateLayoutState((current) => ({
+        ...current,
+        expandingFolderPaths: current.expandingFolderPaths.filter(
+          (item) => item !== folderPath,
+        ),
+        collapsingFolderPaths: current.collapsingFolderPaths.includes(folderPath)
+          ? current.collapsingFolderPaths
+          : [...current.collapsingFolderPaths, folderPath],
+      }));
     },
-    [collapsedFolderPathSet, collapsingFolderPathSet],
+    [collapsedFolderPathSet, collapsingFolderPathSet, updateLayoutState],
   );
 
   const resolveVisibleNodeId = useCallback(
@@ -2826,12 +2908,13 @@ export const CanvasPane = memo(function CanvasPane({
   useEffect(() => {
     const inst = rfRef.current;
     if (!inst || !groupFollowRequest) return;
+    if (handledGroupFollowTokenRef.current === groupFollowRequest.token) return;
 
     const node = inst.getNode(groupFollowRequest.nodeId);
     if (!node) return;
 
     focusCanvasNode(inst, node, 1.02, 260);
-    setGroupFollowRequest(null);
+    handledGroupFollowTokenRef.current = groupFollowRequest.token;
   }, [groupFollowRequest, nodeTopologyKey]);
 
   const isTraceAtEnd = traceCursor >= traceTotal;
