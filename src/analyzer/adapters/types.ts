@@ -10,28 +10,40 @@ export interface FrameworkStateHookResolution {
   bindingKind: "tuple" | "identifier";
 }
 
+export interface FrameworkDecoratedMethodOwnerResolution {
+  name: string;
+}
+
 export interface FrameworkSemanticAdapter {
   name: string;
   resolveCallbackHook?(args: {
     checker: ts.TypeChecker;
+    call: ts.CallExpression;
     expression: ts.LeftHandSideExpression;
   }): FrameworkCallbackHookResolution | null;
   resolveStateHook?(args: {
     checker: ts.TypeChecker;
     expression: ts.LeftHandSideExpression;
   }): FrameworkStateHookResolution | null;
+  resolveDecoratedMethodOwner?(args: {
+    checker: ts.TypeChecker;
+    classDecl: ts.ClassDeclaration;
+    methodDecl: ts.MethodDeclaration;
+  }): FrameworkDecoratedMethodOwnerResolution | null;
 }
 
 export function resolveFrameworkCallbackHook(args: {
   adapters: readonly FrameworkSemanticAdapter[];
   checker: ts.TypeChecker;
+  call: ts.CallExpression;
   expression: ts.LeftHandSideExpression;
 }): FrameworkCallbackHookResolution | null {
-  const { adapters, checker, expression } = args;
+  const { adapters, checker, expression, call } = args;
 
   for (const adapter of adapters) {
     const hook = adapter.resolveCallbackHook?.({
       checker,
+      call,
       expression,
     });
     if (hook) {
@@ -56,6 +68,28 @@ export function resolveFrameworkStateHook(args: {
     });
     if (hook) {
       return hook;
+    }
+  }
+
+  return null;
+}
+
+export function resolveFrameworkDecoratedMethodOwner(args: {
+  adapters: readonly FrameworkSemanticAdapter[];
+  checker: ts.TypeChecker;
+  classDecl: ts.ClassDeclaration;
+  methodDecl: ts.MethodDeclaration;
+}): FrameworkDecoratedMethodOwnerResolution | null {
+  const { adapters, checker, classDecl, methodDecl } = args;
+
+  for (const adapter of adapters) {
+    const owner = adapter.resolveDecoratedMethodOwner?.({
+      checker,
+      classDecl,
+      methodDecl,
+    });
+    if (owner) {
+      return owner;
     }
   }
 

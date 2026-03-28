@@ -97,6 +97,7 @@ export const reactSemanticAdapter: FrameworkSemanticAdapter = {
   resolveCallbackHook({
     checker,
     expression,
+    call: _call,
   }): FrameworkCallbackHookResolution | null {
     const name = resolveReactHook({
       checker,

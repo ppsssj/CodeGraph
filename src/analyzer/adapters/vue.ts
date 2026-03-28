@@ -97,6 +97,7 @@ export const vueSemanticAdapter: FrameworkSemanticAdapter = {
   resolveCallbackHook({
     checker,
     expression,
+    call: _call,
   }): FrameworkCallbackHookResolution | null {
     const name = resolveVueHook({
       checker,

@@ -1071,6 +1071,202 @@ suite("Analyzer Test Suite", function () {
     );
   });
 
+  test("promotes Express route callbacks into separate graph owners", () => {
+    const result = analyzeTypeScriptWithTypes({
+      fileName: "express-routes.ts",
+      languageId: "typescript",
+      code: `
+        import express, { Router } from "express";
+
+        function loadUsers() {
+          return ["alice", "bob"];
+        }
+
+        export function registerRoutes() {
+          const app = express();
+          const router = Router();
+
+          app.get("/users", (_req, _res) => {
+            return loadUsers();
+          });
+
+          router.post("/users", (_req, _res) => {
+            return loadUsers();
+          });
+
+          return { app, router };
+        }
+      `,
+    });
+
+    const getRouteNode = result.graph.nodes.find(
+      (node) => node.name === "registerRoutes.route.get:/users#1",
+    );
+    const postRouteNode = result.graph.nodes.find(
+      (node) => node.name === "registerRoutes.route.post:/users#1",
+    );
+    const helperNode = result.graph.nodes.find((node) => node.name === "loadUsers");
+
+    assert.ok(getRouteNode, "app.get() callback should become a graph node");
+    assert.ok(postRouteNode, "router.post() callback should become a graph node");
+    assert.ok(helperNode, "loadUsers() should still be present in the graph");
+
+    assert.ok(
+      result.graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === getRouteNode?.id &&
+          edge.target === helperNode?.id,
+      ),
+      "app.get() callback should own loadUsers() call edges",
+    );
+    assert.ok(
+      result.graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === postRouteNode?.id &&
+          edge.target === helperNode?.id,
+      ),
+      "router.post() callback should own loadUsers() call edges",
+    );
+  });
+
+  test("connects Express named handlers and middleware to route owners", () => {
+    const result = analyzeTypeScriptWithTypes({
+      fileName: "express-named-handlers.ts",
+      languageId: "typescript",
+      code: `
+        import express from "express";
+
+        function requireAuth() {
+          return "auth";
+        }
+
+        function listUsers() {
+          return ["alice", "bob"];
+        }
+
+        export function registerRoutes() {
+          const app = express();
+
+          app.use("/api", requireAuth);
+          app.get("/users", listUsers);
+
+          return app;
+        }
+      `,
+    });
+
+    const middlewareNode = result.graph.nodes.find(
+      (node) => node.name === "registerRoutes.route.use:/api#1",
+    );
+    const routeNode = result.graph.nodes.find(
+      (node) => node.name === "registerRoutes.route.get:/users#1",
+    );
+    const authNode = result.graph.nodes.find(
+      (node) => node.name === "requireAuth",
+    );
+    const listUsersNode = result.graph.nodes.find(
+      (node) => node.name === "listUsers",
+    );
+
+    assert.ok(middlewareNode, "app.use() should create a route owner node");
+    assert.ok(routeNode, "named route handler should still create a route owner node");
+    assert.ok(authNode, "requireAuth() should still be present in the graph");
+    assert.ok(listUsersNode, "listUsers() should still be present in the graph");
+
+    assert.ok(
+      result.graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === middlewareNode?.id &&
+          edge.target === authNode?.id,
+      ),
+      "app.use() route owner should call the named middleware handler",
+    );
+    assert.ok(
+      result.graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === routeNode?.id &&
+          edge.target === listUsersNode?.id,
+      ),
+      "app.get() route owner should call the named route handler",
+    );
+  });
+
+  test("promotes Nest controller methods into route owners", () => {
+    const result = analyzeTypeScriptWithTypes({
+      fileName: "nest-controller.ts",
+      languageId: "typescript",
+      code: `
+        import { Controller, Get, Post } from "@nestjs/common";
+
+        export class UsersService {
+          findAll() {
+            return ["alice", "bob"];
+          }
+
+          create() {
+            return { ok: true };
+          }
+        }
+
+        @Controller("users")
+        export class UsersController {
+          constructor(private readonly usersService: UsersService) {}
+
+          @Get()
+          listUsers() {
+            return this.usersService.findAll();
+          }
+
+          @Post("invite")
+          inviteUser() {
+            return this.usersService.create();
+          }
+        }
+      `,
+    });
+
+    const getRouteNode = result.graph.nodes.find(
+      (node) => node.name === "UsersController.route.get:/users#1",
+    );
+    const postRouteNode = result.graph.nodes.find(
+      (node) => node.name === "UsersController.route.post:/users/invite#1",
+    );
+    const listUsersNode = result.graph.nodes.find(
+      (node) => node.name === "UsersController.listUsers",
+    );
+    const inviteUserNode = result.graph.nodes.find(
+      (node) => node.name === "UsersController.inviteUser",
+    );
+
+    assert.ok(getRouteNode, "@Get() should create a route owner node");
+    assert.ok(postRouteNode, "@Post() should create a route owner node");
+    assert.ok(listUsersNode, "controller method should still be present");
+    assert.ok(inviteUserNode, "controller method should still be present");
+
+    assert.ok(
+      result.graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === getRouteNode?.id &&
+          edge.target === listUsersNode?.id,
+      ),
+      "@Get() route owner should call the controller method",
+    );
+    assert.ok(
+      result.graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === postRouteNode?.id &&
+          edge.target === inviteUserNode?.id,
+      ),
+      "@Post() route owner should call the controller method",
+    );
+  });
+
   test("resolves workspace calls across sibling files", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "codegraph-analyzer-"));
     const entryFile = path.join(root, "entry.ts");

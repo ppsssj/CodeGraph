@@ -4,6 +4,7 @@ import * as ts from "typescript";
 import {
   defaultFrameworkSemanticAdapters,
   resolveFrameworkCallbackHook,
+  resolveFrameworkDecoratedMethodOwner,
   resolveFrameworkStateHook,
 } from "./adapters";
 import type { FrameworkSemanticAdapter } from "./adapters";
@@ -773,6 +774,14 @@ function buildActiveFileGraph(
     expr: ts.Expression;
     label: string;
   }> = [];
+  const pendingSyntheticOwnerEdges: Array<{
+    sourceId: string;
+    targetId: string;
+  }> = [];
+  const pendingSyntheticOwnerCalls: Array<{
+    ownerId: string;
+    expr: ts.Expression;
+  }> = [];
 
   // IMPORTANT: Node IDs must be stable. Never derive IDs from display names.
   // Use only kind + filePath + position (or range) so merges/expansions don't create duplicates.
@@ -1062,6 +1071,7 @@ function buildActiveFileGraph(
     const callbackHook = resolveFrameworkCallbackHook({
       adapters,
       checker,
+      call,
       expression: call.expression,
     });
     if (!callbackHook) {
@@ -1069,25 +1079,42 @@ function buildActiveFileGraph(
     }
     const hookName = callbackHook.name;
     const callback = call.arguments[callbackHook.callbackArgIndex];
-    if (
-      !callback ||
-      (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))
-    ) {
+    if (!callback) {
       return false;
     }
 
-    const callbackId = pushNode(
-      callback as unknown as ts.Declaration,
-      "function",
-      getHookCallbackName(parentId, hookName),
-      { parentId },
-    );
+    const callbackName = getHookCallbackName(parentId, hookName);
+    if (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
+      const callbackId = pushNode(
+        callback as unknown as ts.Declaration,
+        "function",
+        callbackName,
+        { parentId },
+      );
 
-    if (ts.isBlock(callback.body)) {
-      ts.forEachChild(callback.body, (child) => visitDecls(child, callbackId));
+      if (ts.isBlock(callback.body)) {
+        ts.forEachChild(callback.body, (child) => visitDecls(child, callbackId));
+      }
+
+      return true;
     }
 
-    return true;
+    if (
+      ts.isIdentifier(callback) ||
+      ts.isPropertyAccessExpression(callback) ||
+      ts.isElementAccessExpression(callback)
+    ) {
+      const callbackId = pushSyntheticNode(call, "function", callbackName, {
+        parentId,
+      });
+      pendingSyntheticOwnerCalls.push({
+        ownerId: callbackId,
+        expr: callback,
+      });
+      return true;
+    }
+
+    return false;
   };
 
   const visitObjectLiteralMembers = (
@@ -1226,6 +1253,24 @@ function buildActiveFileGraph(
           const methodId = pushNode(m, "method", `${className}.${m.name.text}`, {
             parentId: classId,
           });
+          const decoratedOwner = resolveFrameworkDecoratedMethodOwner({
+            adapters,
+            checker,
+            classDecl: node,
+            methodDecl: m,
+          });
+          if (decoratedOwner) {
+            const routeOwnerId = pushSyntheticNode(
+              m,
+              "function",
+              getHookCallbackName(classId, decoratedOwner.name),
+              { parentId: classId },
+            );
+            pendingSyntheticOwnerEdges.push({
+              sourceId: routeOwnerId,
+              targetId: methodId,
+            });
+          }
           if (m.body) {
             ts.forEachChild(m.body, (child) => visitDecls(child, methodId));
           }
@@ -1568,6 +1613,55 @@ function buildActiveFileGraph(
     }
   };
 
+  const addSyntheticOwnerCallEdge = (
+    ownerId: string,
+    expr: ts.Expression,
+  ) => {
+    try {
+      const sym = resolveExpressionSymbol(expr);
+      const decl = sym ? pickBestDeclaration(sym, checker) : undefined;
+      if (!decl) {
+        return;
+      }
+
+      const localId = resolveLocalNodeIdForDeclaration(decl);
+      if (localId) {
+        if (localId !== ownerId) {
+          addEdge("calls", ownerId, localId);
+        }
+        return;
+      }
+
+      const loc = declLocation(decl);
+      if (isTypeScriptLibFile(loc.fileName)) {
+        return;
+      }
+
+      let signature: string | undefined;
+      try {
+        if (ts.isFunctionLike(decl as ts.Node)) {
+          const sig = checker.getSignatureFromDeclaration(
+            decl as ts.SignatureDeclaration,
+          );
+          signature = sig ? checker.signatureToString(sig) : undefined;
+        }
+      } catch {
+        signature = undefined;
+      }
+
+      const targetId = ensureExternalNode(
+        expressionReferenceName(expr),
+        loc,
+        signature,
+      );
+      if (targetId !== ownerId) {
+        addEdge("calls", ownerId, targetId);
+      }
+    } catch {
+      // ignore handler lookup failures
+    }
+  };
+
   const resolveJsxTarget = (
     node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
   ) => {
@@ -1862,6 +1956,14 @@ function buildActiveFileGraph(
       relation.expr,
       relation.label,
     );
+  }
+
+  for (const relation of pendingSyntheticOwnerCalls) {
+    addSyntheticOwnerCallEdge(relation.ownerId, relation.expr);
+  }
+
+  for (const relation of pendingSyntheticOwnerEdges) {
+    addEdge("calls", relation.sourceId, relation.targetId);
   }
 
   for (const ownerId of ownerDeclById.keys()) {

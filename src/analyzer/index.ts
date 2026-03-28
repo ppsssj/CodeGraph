@@ -3,10 +3,12 @@ import type { FrameworkSemanticAdapter } from "./adapters";
 export {
   defaultFrameworkSemanticAdapters,
   resolveFrameworkCallbackHook,
+  resolveFrameworkDecoratedMethodOwner,
   resolveFrameworkStateHook,
 } from "./adapters";
 export type {
   FrameworkCallbackHookResolution,
+  FrameworkDecoratedMethodOwnerResolution,
   FrameworkSemanticAdapter,
   FrameworkStateHookResolution,
 } from "./adapters";
