@@ -24,6 +24,7 @@ import {
   type GraphTraceEvent,
   type PatchPreview,
   type RuntimeDebugPayload,
+  type TraceScope,
   type UINotice,
   type WebviewToExtMessage,
 } from "./lib/vscode";
@@ -111,6 +112,27 @@ function getAnalysisPayloadCounts(payload: AnalysisPayload) {
     traceEvents: payload?.trace?.length ?? 0,
     diagnostics: payload?.diagnostics?.length ?? 0,
   };
+}
+
+function getTraceEventKey(event: GraphTraceEvent) {
+  return event.type === "node" ? `node:${event.node.id}` : `edge:${event.edge.id}`;
+}
+
+function areTraceEventsEquivalent(
+  prev: GraphTraceEvent[] | null,
+  next: GraphTraceEvent[],
+) {
+  if (!prev || prev.length !== next.length) {
+    return false;
+  }
+
+  for (let i = 0; i < prev.length; i += 1) {
+    if (getTraceEventKey(prev[i]) !== getTraceEventKey(next[i])) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function getNodeDebugInfo(node: GraphNode | null) {
@@ -566,6 +588,8 @@ export default function App() {
   const [activeChip, setActiveChip] = useState<ChipKey[]>(["all"]);
   const [searchQuery, setSearchQuery] = useState("");
   const [traceMode, setTraceMode] = useState(false);
+  const [traceScope, setTraceScope] = useState<TraceScope>("single-file");
+  const [traceAnchorFilePath, setTraceAnchorFilePath] = useState<string | null>(null);
   const LS_GRAPH_DEPTH = "cg.graphDepth";
   const [graphDepth, setGraphDepth] = useState<number>(() => {
     try {
@@ -687,6 +711,11 @@ export default function App() {
   const [analysisLoading, setAnalysisLoading] =
     useState<AnalysisLoadingState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const effectiveTraceDepth = traceScope === "current-depth" ? graphDepth : 0;
+  const traceLoadingDetail =
+    traceScope === "current-depth"
+      ? `Tracing the current graph scope with ${describeDepth(graphDepth)}.`
+      : "Tracing a single file and preparing a step-by-step graph view.";
 
   const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "done">(
     "idle",
@@ -746,6 +775,16 @@ export default function App() {
       toastTimerRef.current = null;
     }, ms);
   }, []);
+
+  const syncTraceState = useCallback((nextTraceMode: boolean, nextTraceScope: TraceScope) => {
+    postMessage("trace.state.sync", {
+      type: "setTraceState",
+      payload: {
+        traceMode: nextTraceMode,
+        traceScope: nextTraceScope,
+      },
+    });
+  }, [postMessage]);
 
   const noticeSeverityToToastKind = (severity: NoticeSeverity): ToastKind => {
     if (severity === "warning") return "warning";
@@ -917,10 +956,20 @@ export default function App() {
   const graphRef = useRef<GraphPayload | undefined>(undefined);
   const activeGraphGenerationRef = useRef(-1);
   const latestActiveSequenceRef = useRef(0);
+  const traceEventsRef = useRef<GraphTraceEvent[] | null>(null);
+  const traceCursorRef = useRef(0);
 
   useEffect(() => {
     graphRef.current = graphState;
   }, [graphState]);
+
+  useEffect(() => {
+    traceEventsRef.current = traceEvents;
+  }, [traceEvents]);
+
+  useEffect(() => {
+    traceCursorRef.current = traceCursor;
+  }, [traceCursor]);
 
   useEffect(() => {
     pushWebviewDebugEvent("app.graphState.changed", {
@@ -1078,11 +1127,18 @@ export default function App() {
             });
             const maxEvents = 800;
             const events = trace.slice(0, maxEvents);
+            const preserveCursor = areTraceEventsEquivalent(traceEventsRef.current, events)
+              ? Math.min(traceCursorRef.current, events.length)
+              : 0;
             setTraceEvents(events);
-            setTraceCursor(0);
-            setGraphState(undefined);
+            setTraceCursor(preserveCursor);
+            setGraphState(
+              preserveCursor > 0 ? buildGraphFromTrace(events, preserveCursor) : undefined,
+            );
             setCanvasNotice(diagnosticsNotice);
-            showToast("info", `Trace ready: 0 / ${events.length}`, 1500);
+            if (preserveCursor === 0) {
+              showToast("info", `Trace ready: 0 / ${events.length}`, 1500);
+            }
             return;
           }
 
@@ -1526,7 +1582,10 @@ export default function App() {
   const activeFilePath = activeFile ? uriToFsPath(activeFile.uri) : null;
   const rootFilePath = rootTarget?.kind === "file" ? rootTarget.path : null;
   const rootFolderPath = rootTarget?.kind === "folder" ? rootTarget.path : null;
-  const graphFilePath = rootFilePath ?? activeFilePath;
+  const graphFilePath =
+    rootFilePath ??
+    (traceMode && traceScope === "current-depth" ? traceAnchorFilePath : null) ??
+    activeFilePath;
   const workspaceRoot = workspaceFiles?.rootPath ?? null;
   const scaffoldTargetFilePath =
     rootFilePath ?? scaffoldTargetContext.targetFilePath ?? activeFilePath;
@@ -1604,42 +1663,72 @@ export default function App() {
     setTraceMode(false);
     setTraceEvents(null);
     setTraceCursor(0);
-  }, []);
+    setTraceAnchorFilePath(null);
+    syncTraceState(false, traceScope);
+  }, [syncTraceState, traceScope]);
   const toggleTraceMode = useCallback(() => {
     setTraceMode((prev) => {
       const next = !prev;
+      syncTraceState(next, traceScope);
       if (next) {
         resetGraph();
         beginAnalysisLoading(
           "Loading trace graph...",
-          "Tracing a single file and preparing a step-by-step graph view.",
+          traceLoadingDetail,
         );
         const traceFilePath = graphFilePath ?? activeFilePath;
+        setTraceAnchorFilePath(traceScope === "current-depth" ? traceFilePath : null);
         if (traceFilePath) {
           postMessage("trace.toggle.on.file", {
             type: "selectWorkspaceFile",
-            payload: { filePath: traceFilePath, graphDepth: 0, traceMode: true },
+            payload: {
+              filePath: traceFilePath,
+              graphDepth: effectiveTraceDepth,
+              traceMode: true,
+              traceScope,
+            },
           });
         } else {
+          setTraceAnchorFilePath(null);
           postMessage("trace.toggle.on.active", {
             type: "analyzeActiveFile",
-            payload: { traceMode: true, graphDepth: 0 },
+            payload: {
+              traceMode: true,
+              graphDepth: effectiveTraceDepth,
+              traceScope,
+            },
           });
         }
       } else {
         setTraceEvents(null);
         setTraceCursor(0);
+        setTraceAnchorFilePath(null);
       }
       return next;
     });
-  }, [activeFilePath, beginAnalysisLoading, graphFilePath, postMessage, resetGraph]);
+  }, [
+    activeFilePath,
+    beginAnalysisLoading,
+    effectiveTraceDepth,
+    graphFilePath,
+    postMessage,
+    resetGraph,
+    syncTraceState,
+    traceLoadingDetail,
+    traceScope,
+  ]);
 
   const expandExternalFile = useCallback((filePath: string) => {
     if (traceMode) {
       pushWebviewDebugEvent("expandNode.skipped.trace-mode", {
         filePath,
       });
-      showToast("info", "Single-file trace does not expand external files");
+      showToast(
+        "info",
+        traceScope === "current-depth"
+          ? "Trace follows the configured depth. Increase depth to include more files."
+          : "Single-file trace does not expand external files",
+      );
       return;
     }
     if (!filePath) {
@@ -1668,7 +1757,7 @@ export default function App() {
             : undefined,
       },
     });
-  }, [beginAnalysisLoading, postMessage, showToast, traceMode]);
+  }, [beginAnalysisLoading, postMessage, showToast, traceMode, traceScope]);
 
   useEffect(() => {
     if (!runtimeDebug || runtimeDebug.state !== "paused") return;
@@ -1754,13 +1843,18 @@ export default function App() {
     beginAnalysisLoading(
       traceMode ? "Loading trace graph..." : "Rendering graph...",
       traceMode
-        ? "Tracing a single file and preparing a step-by-step graph view."
+        ? traceLoadingDetail
         : `Analyzing ${shortBaseName(graphFilePath ?? activeFilePath ?? "the active file")} with ${describeDepth(graphDepth)}.`,
     );
     if (traceMode && graphFilePath) {
       postMessage("canvas.emptyState.generate.traceFile", {
         type: "selectWorkspaceFile",
-        payload: { filePath: graphFilePath, graphDepth: 0, traceMode: true },
+        payload: {
+          filePath: graphFilePath,
+          graphDepth: effectiveTraceDepth,
+          traceMode: true,
+          traceScope,
+        },
       });
       return;
     }
@@ -1773,9 +1867,23 @@ export default function App() {
     }
     postMessage("canvas.emptyState.generate", {
       type: "analyzeActiveFile",
-      payload: { traceMode, graphDepth: traceMode ? 0 : graphDepth },
+      payload: {
+        traceMode,
+        graphDepth: traceMode ? effectiveTraceDepth : graphDepth,
+        traceScope: traceMode ? traceScope : undefined,
+      },
     });
-  }, [activeFilePath, beginAnalysisLoading, graphDepth, graphFilePath, postMessage, traceMode]);
+  }, [
+    activeFilePath,
+    beginAnalysisLoading,
+    effectiveTraceDepth,
+    graphDepth,
+    graphFilePath,
+    postMessage,
+    traceLoadingDetail,
+    traceMode,
+    traceScope,
+  ]);
 
   const handleUseSelectedFileAsRoot = useCallback(() => {
     if (!selectedNode?.file || selectedNode.kind !== "file") {
@@ -1797,20 +1905,29 @@ export default function App() {
     setInspectorFocusRequest(null);
     beginAnalysisLoading(
       `Locking graph to ${shortBaseName(nextRootFilePath)}...`,
-      `Rebuilding the graph with ${describeDepth(graphDepth)}.`,
+      traceMode ? traceLoadingDetail : `Rebuilding the graph with ${describeDepth(graphDepth)}.`,
     );
     postMessage("canvas.useSelectedFileAsRoot", {
       type: "selectWorkspaceFile",
-      payload: { filePath: nextRootFilePath, graphDepth },
+      payload: {
+        filePath: nextRootFilePath,
+        graphDepth: traceMode ? effectiveTraceDepth : graphDepth,
+        traceMode,
+        traceScope: traceMode ? traceScope : undefined,
+      },
     });
   }, [
     beginAnalysisLoading,
     clearSelectedNodes,
+    effectiveTraceDepth,
     graphDepth,
     graphFilePath,
     postMessage,
     selectedNode,
     syncGraphRoot,
+    traceLoadingDetail,
+    traceMode,
+    traceScope,
   ]);
 
   const handleUseSelectedFolderAsRoot = useCallback((folderPath: string) => {
@@ -1823,14 +1940,29 @@ export default function App() {
       resetGraph();
       beginAnalysisLoading(
         `Locking graph to ${shortBaseName(folderPath)}...`,
-        `Rebuilding the graph with ${describeDepth(graphDepth)}.`,
+        traceMode ? traceLoadingDetail : `Rebuilding the graph with ${describeDepth(graphDepth)}.`,
       );
       postMessage("canvas.useSelectedFolderAsRoot", {
         type: "analyzeActiveFile",
-        payload: { traceMode: false, graphDepth },
+        payload: {
+          traceMode,
+          graphDepth: traceMode ? effectiveTraceDepth : graphDepth,
+          traceScope: traceMode ? traceScope : undefined,
+        },
       });
     }
-  }, [activeFilePath, beginAnalysisLoading, graphDepth, postMessage, resetGraph, syncGraphRoot]);
+  }, [
+    activeFilePath,
+    beginAnalysisLoading,
+    effectiveTraceDepth,
+    graphDepth,
+    postMessage,
+    resetGraph,
+    syncGraphRoot,
+    traceLoadingDetail,
+    traceMode,
+    traceScope,
+  ]);
 
   const handleClearRoot = useCallback(() => {
     syncGraphRoot(null);
@@ -2127,41 +2259,64 @@ export default function App() {
         activeFilePath={graphFilePath}
         onPickFile={(filePath) => {
           resetGraph();
-          syncGraphRoot({ kind: "file", path: filePath });
+          if (!traceMode) {
+            syncGraphRoot({ kind: "file", path: filePath });
+          }
+          if (traceMode && traceScope === "current-depth") {
+            setTraceAnchorFilePath(filePath);
+          }
           beginAnalysisLoading(
-            `Loading ${shortBaseName(filePath)}...`,
-            `Building the graph with ${describeDepth(graphDepth)}.`,
+            traceMode ? "Loading trace graph..." : `Loading ${shortBaseName(filePath)}...`,
+            traceMode
+              ? traceLoadingDetail
+              : `Building the graph with ${describeDepth(graphDepth)}.`,
           );
           postMessage("topbar.pickFile", {
             type: "selectWorkspaceFile",
-            payload: { filePath, graphDepth },
+            payload: {
+              filePath,
+              graphDepth: traceMode ? effectiveTraceDepth : graphDepth,
+              traceMode,
+              traceScope: traceMode ? traceScope : undefined,
+            },
           });
         }}
-        graphDepth={traceMode ? 0 : graphDepth}
+        graphDepth={graphDepth}
         onGraphDepthChange={(nextDepth) => {
           const normalized = clampGraphDepth(nextDepth);
           if (normalized === graphDepth) {return;}
           setGraphDepth(normalized);
-          if (traceMode) {return;}
+          if (traceMode && traceScope === "single-file") {return;}
           resetGraph();
-          if (graphFilePath) {
+          if (!traceMode && graphFilePath) {
             syncGraphRoot({ kind: "file", path: graphFilePath });
           }
           beginAnalysisLoading(
-            "Rebuilding graph...",
-            `Updating the view for ${describeDepth(normalized)}.`,
+            traceMode ? "Loading trace graph..." : "Rebuilding graph...",
+            traceMode
+              ? `Tracing the current graph scope with ${describeDepth(normalized)}.`
+              : `Updating the view for ${describeDepth(normalized)}.`,
           );
           if (graphFilePath) {
             postMessage("topbar.graphDepth.change.rootFile", {
               type: "selectWorkspaceFile",
-              payload: { filePath: graphFilePath, graphDepth: normalized },
+              payload: {
+                filePath: graphFilePath,
+                graphDepth: traceMode ? normalized : normalized,
+                traceMode,
+                traceScope: traceMode ? traceScope : undefined,
+              },
             });
             return;
           }
           if (!activeFilePath) {return;}
           postMessage("topbar.graphDepth.change", {
             type: "analyzeActiveFile",
-            payload: { traceMode: false, graphDepth: normalized },
+            payload: {
+              traceMode,
+              graphDepth: normalized,
+              traceScope: traceMode ? traceScope : undefined,
+            },
           });
         }}
         onRefresh={() => {
@@ -2177,13 +2332,18 @@ export default function App() {
           beginAnalysisLoading(
             traceMode ? "Loading trace graph..." : "Rendering graph...",
             traceMode
-              ? "Tracing a single file and preparing a step-by-step graph view."
+              ? traceLoadingDetail
               : `Analyzing ${shortBaseName(graphFilePath ?? activeFilePath ?? "the active file")} with ${describeDepth(graphDepth)}.`,
           );
           if (traceMode && graphFilePath) {
             postMessage("topbar.generate.traceFile", {
               type: "selectWorkspaceFile",
-              payload: { filePath: graphFilePath, graphDepth: 0, traceMode: true },
+              payload: {
+                filePath: graphFilePath,
+                graphDepth: effectiveTraceDepth,
+                traceMode: true,
+                traceScope,
+              },
             });
             return;
           }
@@ -2196,11 +2356,52 @@ export default function App() {
           }
           postMessage("topbar.generate", {
             type: "analyzeActiveFile",
-            payload: { traceMode, graphDepth: traceMode ? 0 : graphDepth },
+            payload: {
+              traceMode,
+              graphDepth: traceMode ? effectiveTraceDepth : graphDepth,
+              traceScope: traceMode ? traceScope : undefined,
+            },
           });
         }}
         onAutoLayout={() => setAutoLayoutTick((v) => v + 1)}
         traceMode={traceMode}
+        traceScope={traceScope}
+        onTraceScopeChange={(nextScope) => {
+          setTraceScope(nextScope);
+          syncTraceState(traceMode, nextScope);
+          setTraceAnchorFilePath(nextScope === "current-depth" ? (graphFilePath ?? activeFilePath) : null);
+          if (!traceMode) {
+            return;
+          }
+          resetGraph();
+          beginAnalysisLoading(
+            "Loading trace graph...",
+            nextScope === "current-depth"
+              ? `Tracing the current graph scope with ${describeDepth(graphDepth)}.`
+              : "Tracing a single file and preparing a step-by-step graph view.",
+          );
+          const traceFilePath = graphFilePath ?? activeFilePath;
+          if (traceFilePath) {
+            postMessage("topbar.traceScope.change.file", {
+              type: "selectWorkspaceFile",
+              payload: {
+                filePath: traceFilePath,
+                graphDepth: nextScope === "current-depth" ? graphDepth : 0,
+                traceMode: true,
+                traceScope: nextScope,
+              },
+            });
+            return;
+          }
+          postMessage("topbar.traceScope.change.active", {
+            type: "analyzeActiveFile",
+            payload: {
+              traceMode: true,
+              graphDepth: nextScope === "current-depth" ? graphDepth : 0,
+              traceScope: nextScope,
+            },
+          });
+        }}
         onToggleTraceMode={toggleTraceMode}
         onExportJson={exportGraphAsJson}
         onExportJpg={exportGraphAsJpg}

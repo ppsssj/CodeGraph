@@ -13,6 +13,7 @@ export type {
   DesignNode,
   DesignEdge,
   PatchPreview,
+  TraceScope,
   WebviewToExtMessage,
   ExtToWebviewMessage,
   GraphEdge,

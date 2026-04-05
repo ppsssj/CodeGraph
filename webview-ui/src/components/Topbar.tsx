@@ -19,6 +19,8 @@ type WorkspaceFileItem = {
   label: string;
 };
 
+type TraceScope = "single-file" | "current-depth";
+
 type Props = {
   projectName: string;
   workspaceRootName: string | null;
@@ -31,6 +33,8 @@ type Props = {
   onGenerate: () => void;
   onAutoLayout: () => void;
   traceMode: boolean;
+  traceScope: TraceScope;
+  onTraceScopeChange: (scope: TraceScope) => void;
   onToggleTraceMode: () => void;
   onExportJson: () => void;
   onExportJpg: () => void;
@@ -53,6 +57,8 @@ export function Topbar({
   onGenerate,
   onAutoLayout,
   traceMode,
+  traceScope,
+  onTraceScopeChange,
   onToggleTraceMode,
   onExportJson,
   onExportJpg,
@@ -144,7 +150,13 @@ export function Topbar({
   }, [exportMenuOpen, pickerOpen]);
 
   return (
-    <header className={["topbar", traceMode ? "topbar--traceOn" : ""].join(" ")}>
+    <header
+      className={[
+        "topbar",
+        traceMode ? "topbar--traceOn" : "",
+        traceMode ? `topbar--trace-${traceScope}` : "",
+      ].join(" ")}
+    >
       <div className="topbarLeft">
         <div className="brand">
           <img
@@ -230,12 +242,14 @@ export function Topbar({
           <select
             className="depthSelect"
             value={String(graphDepth)}
-            disabled={traceMode}
+            disabled={traceMode && traceScope === "single-file"}
             onChange={(e) => onGraphDepthChange(Number(e.target.value))}
             aria-label="Graph depth"
             title={
               traceMode
-                ? "Trace mode is locked to a single file."
+                ? traceScope === "single-file"
+                  ? "Single-file trace ignores graph depth."
+                  : "Trace follows the current graph depth."
                 : "How many additional external hops to preload into the graph"
             }
           >
@@ -350,7 +364,28 @@ export function Topbar({
           {traceMode ? <span className="traceDot" /> : null}
         </button>
 
-        {traceMode ? <span className="tracePill">TRACE · SINGLE FILE</span> : null}
+        {traceMode ? (
+          <label
+            className="traceScopeControl depthControl"
+            title="Choose how far trace mode can expand"
+          >
+            <select
+              className="depthSelect"
+              value={traceScope}
+              onChange={(e) => onTraceScopeChange(e.target.value as TraceScope)}
+              aria-label="Trace scope"
+            >
+              <option value="single-file">Single File</option>
+              <option value="current-depth">Current Depth</option>
+            </select>
+          </label>
+        ) : null}
+
+        {traceMode ? (
+          <span className="tracePill">
+            {traceScope === "current-depth" ? "TRACE · CURRENT DEPTH" : "TRACE · SINGLE FILE"}
+          </span>
+        ) : null}
 
         <button className="primaryBtn" type="button" onClick={onGenerate}>
           <Play className="icon primaryBtnIcon" />

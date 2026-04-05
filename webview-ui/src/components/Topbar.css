@@ -119,6 +119,19 @@ body.vscode-high-contrast .logoDark {
   background: var(--bg);
 }
 
+.traceScopeControl {
+  min-width: 0;
+}
+
+.topbar--trace-current-depth .tracePill {
+  font-size: 0;
+}
+
+.topbar--trace-current-depth .tracePill::after {
+  content: "TRACE · CURRENT DEPTH";
+  font-size: 12px;
+}
+
 .exportMenuWrap {
   position: relative;
 }

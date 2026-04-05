@@ -2127,6 +2127,72 @@ export const CanvasPane = memo(function CanvasPane({
     },
     [defaultLayoutState, layoutStateKey],
   );
+  useEffect(() => {
+    if (!graph || !traceVisible || traceCursor <= 0 || !traceActiveNodeId) {
+      return;
+    }
+
+    const traceNode = graph.nodes.find((node) => node.id === traceActiveNodeId);
+    if (!traceNode) {
+      return;
+    }
+
+    const targetFilePath = normalizePath(traceNode.file);
+    const targetFolderPaths = getFolderPathChain(
+      folderKeyForFile(traceNode.file),
+      workspaceRoot,
+    );
+
+    updateLayoutState((current) => {
+      const nextCollapsedFiles = current.collapsedFilePaths.filter(
+        (item) => normalizePath(item) !== targetFilePath,
+      );
+      const nextCollapsingFiles = current.collapsingFilePaths.filter(
+        (item) => normalizePath(item) !== targetFilePath,
+      );
+      const nextExpandingFiles = current.expandingFilePaths.some(
+        (item) => normalizePath(item) === targetFilePath,
+      )
+        ? current.expandingFilePaths
+        : [...current.expandingFilePaths, targetFilePath];
+
+      const targetFolderSet = new Set(targetFolderPaths);
+      const nextCollapsedFolders = current.collapsedFolderPaths.filter(
+        (item) => !targetFolderSet.has(item),
+      );
+      const nextCollapsingFolders = current.collapsingFolderPaths.filter(
+        (item) => !targetFolderSet.has(item),
+      );
+      const nextExpandingFolders = [...current.expandingFolderPaths];
+      for (const folderPath of targetFolderPaths) {
+        if (!nextExpandingFolders.includes(folderPath)) {
+          nextExpandingFolders.push(folderPath);
+        }
+      }
+
+      const changed =
+        nextCollapsedFiles.length !== current.collapsedFilePaths.length ||
+        nextCollapsingFiles.length !== current.collapsingFilePaths.length ||
+        nextExpandingFiles.length !== current.expandingFilePaths.length ||
+        nextCollapsedFolders.length !== current.collapsedFolderPaths.length ||
+        nextCollapsingFolders.length !== current.collapsingFolderPaths.length ||
+        nextExpandingFolders.length !== current.expandingFolderPaths.length;
+
+      if (!changed) {
+        return current;
+      }
+
+      return {
+        ...current,
+        collapsedFilePaths: nextCollapsedFiles,
+        collapsingFilePaths: nextCollapsingFiles,
+        expandingFilePaths: nextExpandingFiles,
+        collapsedFolderPaths: nextCollapsedFolders,
+        collapsingFolderPaths: nextCollapsingFolders,
+        expandingFolderPaths: nextExpandingFolders,
+      };
+    });
+  }, [graph, traceActiveNodeId, traceCursor, traceVisible, updateLayoutState, workspaceRoot]);
   const collapsedFilePathSet = useMemo(() => {
     if (!filteredGraph) return new Set<string>();
     return new Set(

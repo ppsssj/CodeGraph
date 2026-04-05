@@ -9,6 +9,7 @@ import type {
   ExtToWebviewMessage,
   GraphPayload,
   GraphTraceEvent,
+  TraceScope,
   UINotice,
   WebviewToExtMessage,
 } from "../shared/protocol";
@@ -65,6 +66,32 @@ function mergeGraphPayload(
   };
 }
 
+function getTraceEventKey(event: GraphTraceEvent) {
+  return event.type === "node" ? `node:${event.node.id}` : `edge:${event.edge.id}`;
+}
+
+function mergeTracePayload(
+  prev: GraphTraceEvent[] | undefined,
+  next: GraphTraceEvent[] | undefined,
+) {
+  if (!next) {return prev;}
+  if (!prev) {return next;}
+
+  const merged = [...prev];
+  const seen = new Set(prev.map(getTraceEventKey));
+
+  for (const event of next) {
+    const key = getTraceEventKey(event);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(event);
+  }
+
+  return merged;
+}
+
 function pruneGraphToFile(graph: GraphPayload, filePath: string) {
   const comparableFilePath = normalizeComparablePath(filePath);
   const keptNodes = graph.nodes.filter(
@@ -81,21 +108,15 @@ function pruneGraphToFile(graph: GraphPayload, filePath: string) {
   };
 }
 
-function pruneTraceToFile(
+function pruneTraceToGraph(
   trace: GraphTraceEvent[] | undefined,
   graph: GraphPayload | undefined,
-  filePath: string,
 ) {
   if (!trace || !graph) {
     return trace;
   }
 
-  const comparableFilePath = normalizeComparablePath(filePath);
-  const keptNodeIds = new Set(
-    graph.nodes
-      .filter((node) => normalizeComparablePath(node.file) === comparableFilePath)
-      .map((node) => node.id),
-  );
+  const keptNodeIds = new Set(graph.nodes.map((node) => node.id));
 
   return trace.filter((event) => {
     if (event.type === "node") {
@@ -112,6 +133,12 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
   if (msg.type === "switchHost") {
     return {
       target: msg.payload.target,
+    };
+  }
+  if (msg.type === "setTraceState") {
+    return {
+      traceMode: msg.payload.traceMode,
+      traceScope: msg.payload.traceScope ?? null,
     };
   }
   if (msg.type === "debugEvent") {
@@ -137,6 +164,7 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
     return {
       filePath: msg.payload.filePath,
       graphDepth: msg.payload.graphDepth ?? null,
+      traceScope: msg.payload.traceScope ?? null,
     };
   }
   if (msg.type === "setGraphRoot") {
@@ -149,6 +177,7 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
     return {
       traceMode: msg.payload?.traceMode ?? false,
       graphDepth: msg.payload?.graphDepth ?? null,
+      traceScope: msg.payload?.traceScope ?? null,
     };
   }
   if (msg.type === "setGraphDepth") {
@@ -187,6 +216,9 @@ export class CodeGraphPanel {
         path: string;
       }
     | null = null;
+  private traceModeActive = false;
+  private traceScope: TraceScope = "single-file";
+  private traceAnchorFilePath: string | null = null;
   private analysisGeneration = 0;
   private analysisSequence = 0;
   private latestActiveAnalysisSequence = 0;
@@ -332,13 +364,31 @@ export class CodeGraphPanel {
               msg.payload.sidebarLocation,
             );
           }
+          if (msg.type === "setTraceState") {
+            this.traceModeActive = msg.payload.traceMode;
+            this.traceScope = msg.payload.traceScope ?? "single-file";
+            if (!this.traceModeActive) {
+              this.traceAnchorFilePath = null;
+            }
+            return;
+          }
           if (msg.type === "analyzeActiveFile") {
             if (msg.payload?.graphDepth !== undefined) {
               this.graphDepth = clampGraphDepth(msg.payload.graphDepth);
             }
+            this.traceModeActive = Boolean(msg.payload?.traceMode);
+            this.traceScope = msg.payload?.traceScope ?? "single-file";
+            if (!this.traceModeActive) {
+              this.traceAnchorFilePath = null;
+            } else if (this.traceScope === "current-depth") {
+              this.traceAnchorFilePath = this.getEditor()?.document.fileName ?? this.traceAnchorFilePath;
+            } else {
+              this.traceAnchorFilePath = null;
+            }
             return await this.postAnalysis(
               Boolean(msg.payload?.traceMode),
               msg.payload?.traceMode ? "trace" : "manual",
+              msg.payload?.traceScope,
             ); // workspace-aware
           }
           if (msg.type === "analyzeWorkspace") {
@@ -351,9 +401,19 @@ export class CodeGraphPanel {
             if (msg.payload.graphDepth !== undefined) {
               this.graphDepth = clampGraphDepth(msg.payload.graphDepth);
             }
+            this.traceModeActive = Boolean(msg.payload.traceMode);
+            this.traceScope = msg.payload.traceScope ?? "single-file";
+            if (!this.traceModeActive) {
+              this.traceAnchorFilePath = null;
+            } else if (this.traceScope === "current-depth") {
+              this.traceAnchorFilePath = msg.payload.filePath;
+            } else {
+              this.traceAnchorFilePath = null;
+            }
             return await this.selectWorkspaceFile(
               msg.payload.filePath,
               Boolean(msg.payload.traceMode),
+              msg.payload.traceScope,
             );
           }
           if (msg.type === "setGraphRoot") {
@@ -412,7 +472,11 @@ export class CodeGraphPanel {
       }
       this.analysisTimer = setTimeout(
         () => {
-          void this.postAnalysis(false, "auto").catch((e) => {
+          void this.postAnalysis(
+            this.traceModeActive,
+            this.traceModeActive ? "trace" : "auto",
+            this.traceScope,
+          ).catch((e) => {
             this.postNotice(
               "canvas",
               "warning",
@@ -638,6 +702,14 @@ export class CodeGraphPanel {
   }
 
   private matchesGraphRoot(filePath: string) {
+    if (
+      this.traceModeActive &&
+      this.traceScope === "current-depth" &&
+      this.traceAnchorFilePath
+    ) {
+      return normalizeComparablePath(filePath) === normalizeComparablePath(this.traceAnchorFilePath);
+    }
+
     if (!this.graphRoot) {
       return true;
     }
@@ -877,6 +949,7 @@ export class CodeGraphPanel {
   private async postAnalysis(
     traceMode = false,
     reason: AnalysisRequestReason = "manual",
+    traceScope: TraceScope = "single-file",
   ) {
     const request = this.beginActiveAnalysis(reason);
     pushPanelDebugEvent("analysis.active.begin", {
@@ -885,6 +958,7 @@ export class CodeGraphPanel {
       sequence: request.sequence,
       reason,
       traceMode,
+      traceScope,
     });
     const editor = this.getEditor();
     if (!editor) {
@@ -909,11 +983,15 @@ export class CodeGraphPanel {
       languageId: doc.languageId,
       traceMode,
       graphDepth: this.graphDepth,
+      traceScope,
     });
+    const singleFileTrace = traceMode && (
+      traceScope === "single-file" || this.graphDepth <= 0
+    );
     const traceScopedGraph =
-      traceMode && result.graph ? pruneGraphToFile(result.graph, doc.fileName) : result.graph;
+      singleFileTrace && result.graph ? pruneGraphToFile(result.graph, doc.fileName) : result.graph;
     const traceScopedTrace = traceMode
-      ? pruneTraceToFile(result.trace, traceScopedGraph, doc.fileName)
+      ? pruneTraceToGraph(result.trace, traceScopedGraph)
       : result.trace;
 
     const payload: Extract<
@@ -992,6 +1070,7 @@ export class CodeGraphPanel {
       languageId,
       graphDepth: 0,
       traceMode: false,
+      traceScope: "single-file",
     });
 
     const payload: Extract<
@@ -1038,7 +1117,11 @@ export class CodeGraphPanel {
     } satisfies ExtToWebviewMessage);
   }
 
-  private async selectWorkspaceFile(filePath: string, traceMode = false) {
+  private async selectWorkspaceFile(
+    filePath: string,
+    traceMode = false,
+    traceScope: TraceScope = "single-file",
+  ) {
     if (!filePath) {
       return;
     }
@@ -1056,7 +1139,11 @@ export class CodeGraphPanel {
 
     this.postActiveFile();
     this.postSelection();
-    await this.postAnalysis(traceMode, traceMode ? "trace" : "select-file");
+    await this.postAnalysis(
+      traceMode,
+      traceMode ? "trace" : "select-file",
+      traceScope,
+    );
   }
 
   private async analyzeWorkspaceWithDepth(args: {
@@ -1065,6 +1152,7 @@ export class CodeGraphPanel {
     languageId: string;
     traceMode: boolean;
     graphDepth: number;
+    traceScope: TraceScope;
   }) {
     const workspaceRoot = this.getWorkspaceRoot();
     const filePaths = await this.getWorkspaceFilePaths();
@@ -1085,8 +1173,15 @@ export class CodeGraphPanel {
       filePaths,
     });
 
-    if (args.traceMode || !baseResult.graph) {
+    if (!baseResult.graph) {
       return baseResult;
+    }
+
+    if (args.traceMode && args.traceScope === "single-file") {
+      return {
+        ...baseResult,
+        graph: pruneGraphToFile(baseResult.graph, args.fileName),
+      };
     }
 
     if (args.graphDepth <= 0) {
@@ -1101,6 +1196,7 @@ export class CodeGraphPanel {
     }
 
     let mergedGraph = baseResult.graph;
+    let mergedTrace = baseResult.trace;
     let frontier = this.collectDepthExpansionFiles(
       baseResult.graph,
       comparableWorkspacePaths,
@@ -1132,6 +1228,9 @@ export class CodeGraphPanel {
           });
 
           mergedGraph = mergeGraphPayload(mergedGraph, expandedResult.graph) ?? mergedGraph;
+          if (args.traceMode) {
+            mergedTrace = mergeTracePayload(mergedTrace, expandedResult.trace) ?? mergedTrace;
+          }
 
           for (const discoveredFile of this.collectDepthExpansionFiles(
             expandedResult.graph,
@@ -1151,6 +1250,7 @@ export class CodeGraphPanel {
     return {
       ...baseResult,
       graph: mergedGraph,
+      trace: args.traceMode ? mergedTrace : baseResult.trace,
     };
   }
 

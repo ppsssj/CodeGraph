@@ -1,3 +1,5 @@
+export type TraceScope = "single-file" | "current-depth";
+
 export type WebviewToExtMessage =
   | { type: "requestActiveFile" }
   | { type: "requestWorkspaceFiles" }
@@ -11,13 +13,25 @@ export type WebviewToExtMessage =
       };
     }
   | {
+      type: "setTraceState";
+      payload: {
+        traceMode: boolean;
+        traceScope?: TraceScope;
+      };
+    }
+  | {
       type: "analyzeActiveFile";
-      payload?: { traceMode?: boolean; graphDepth?: number };
+      payload?: { traceMode?: boolean; graphDepth?: number; traceScope?: TraceScope };
     }
   | { type: "analyzeWorkspace"; payload?: { graphDepth?: number } }
   | {
       type: "selectWorkspaceFile";
-      payload: { filePath: string; graphDepth?: number; traceMode?: boolean };
+      payload: {
+        filePath: string;
+        graphDepth?: number;
+        traceMode?: boolean;
+        traceScope?: TraceScope;
+      };
     }
   | {
       type: "setGraphRoot";
