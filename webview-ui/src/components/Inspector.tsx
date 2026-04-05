@@ -107,6 +107,7 @@ type Props = {
   onRefreshActive: () => void;
   onResetGraph: () => void;
   onExpandExternal: (filePath: string) => void;
+  traceMode?: boolean;
   rootTarget?:
     | {
         kind: "file" | "folder";
@@ -461,6 +462,7 @@ export function Inspector({
   onRefreshActive,
   onResetGraph,
   onExpandExternal,
+  traceMode = false,
   rootTarget = null,
   onClearRoot,
   collapsed = false,
@@ -1365,7 +1367,7 @@ export function Inspector({
           <button className="smallBtn" type="button" onClick={onResetGraph}>
             Reset Graph
           </button>
-          {selectedNode && selectedNode.kind === "external" ? (
+          {selectedNode && selectedNode.kind === "external" && !traceMode ? (
             <button
               className="smallBtn"
               type="button"

@@ -230,8 +230,14 @@ export function Topbar({
           <select
             className="depthSelect"
             value={String(graphDepth)}
+            disabled={traceMode}
             onChange={(e) => onGraphDepthChange(Number(e.target.value))}
             aria-label="Graph depth"
+            title={
+              traceMode
+                ? "Trace mode is locked to a single file."
+                : "How many additional external hops to preload into the graph"
+            }
           >
             <option value="0">0 · file only</option>
             <option value="1">1 · direct</option>
@@ -344,7 +350,7 @@ export function Topbar({
           {traceMode ? <span className="traceDot" /> : null}
         </button>
 
-        {traceMode ? <span className="tracePill">TRACE MODE</span> : null}
+        {traceMode ? <span className="tracePill">TRACE · SINGLE FILE</span> : null}
 
         <button className="primaryBtn" type="button" onClick={onGenerate}>
           <Play className="icon primaryBtnIcon" />

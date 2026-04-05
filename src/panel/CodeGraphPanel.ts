@@ -8,6 +8,7 @@ import type {
   AnalysisRequestReason,
   ExtToWebviewMessage,
   GraphPayload,
+  GraphTraceEvent,
   UINotice,
   WebviewToExtMessage,
 } from "../shared/protocol";
@@ -78,6 +79,30 @@ function pruneGraphToFile(graph: GraphPayload, filePath: string) {
     nodes: keptNodes,
     edges: keptEdges,
   };
+}
+
+function pruneTraceToFile(
+  trace: GraphTraceEvent[] | undefined,
+  graph: GraphPayload | undefined,
+  filePath: string,
+) {
+  if (!trace || !graph) {
+    return trace;
+  }
+
+  const comparableFilePath = normalizeComparablePath(filePath);
+  const keptNodeIds = new Set(
+    graph.nodes
+      .filter((node) => normalizeComparablePath(node.file) === comparableFilePath)
+      .map((node) => node.id),
+  );
+
+  return trace.filter((event) => {
+    if (event.type === "node") {
+      return keptNodeIds.has(event.node.id);
+    }
+    return keptNodeIds.has(event.edge.source) && keptNodeIds.has(event.edge.target);
+  });
 }
 
 function summarizeInboundMessage(msg: WebviewToExtMessage) {
@@ -326,7 +351,10 @@ export class CodeGraphPanel {
             if (msg.payload.graphDepth !== undefined) {
               this.graphDepth = clampGraphDepth(msg.payload.graphDepth);
             }
-            return await this.selectWorkspaceFile(msg.payload.filePath);
+            return await this.selectWorkspaceFile(
+              msg.payload.filePath,
+              Boolean(msg.payload.traceMode),
+            );
           }
           if (msg.type === "setGraphRoot") {
             this.graphRoot = msg.payload.root;
@@ -882,6 +910,11 @@ export class CodeGraphPanel {
       traceMode,
       graphDepth: this.graphDepth,
     });
+    const traceScopedGraph =
+      traceMode && result.graph ? pruneGraphToFile(result.graph, doc.fileName) : result.graph;
+    const traceScopedTrace = traceMode
+      ? pruneTraceToFile(result.trace, traceScopedGraph, doc.fileName)
+      : result.trace;
 
     const payload: Extract<
       ExtToWebviewMessage,
@@ -898,8 +931,8 @@ export class CodeGraphPanel {
       exports: result.exports,
       calls: result.calls,
       diagnostics: result.diagnostics,
-      graph: result.graph,
-      trace: traceMode ? result.trace : undefined,
+      graph: traceScopedGraph,
+      trace: traceMode ? traceScopedTrace : undefined,
       meta: result.meta,
     };
 
@@ -918,9 +951,9 @@ export class CodeGraphPanel {
       generation: request.generation,
       sequence: request.sequence,
       filePath: doc.fileName,
-      traceEvents: traceMode ? result.trace?.length ?? 0 : 0,
+      traceEvents: traceMode ? traceScopedTrace?.length ?? 0 : 0,
       diagnostics: result.diagnostics.length,
-      ...getGraphCounts(result.graph),
+      ...getGraphCounts(traceScopedGraph),
     });
 
     this.panel.webview.postMessage({
@@ -1005,7 +1038,7 @@ export class CodeGraphPanel {
     } satisfies ExtToWebviewMessage);
   }
 
-  private async selectWorkspaceFile(filePath: string) {
+  private async selectWorkspaceFile(filePath: string, traceMode = false) {
     if (!filePath) {
       return;
     }
@@ -1023,7 +1056,7 @@ export class CodeGraphPanel {
 
     this.postActiveFile();
     this.postSelection();
-    await this.postAnalysis(false, "select-file");
+    await this.postAnalysis(traceMode, traceMode ? "trace" : "select-file");
   }
 
   private async analyzeWorkspaceWithDepth(args: {

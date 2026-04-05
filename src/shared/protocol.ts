@@ -17,7 +17,7 @@ export type WebviewToExtMessage =
   | { type: "analyzeWorkspace"; payload?: { graphDepth?: number } }
   | {
       type: "selectWorkspaceFile";
-      payload: { filePath: string; graphDepth?: number };
+      payload: { filePath: string; graphDepth?: number; traceMode?: boolean };
     }
   | {
       type: "setGraphRoot";
