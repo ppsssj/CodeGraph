@@ -67,7 +67,7 @@ Cogic는 두 가지 호스트 모드를 지원합니다.
 
 ## Runtime Debug 데모
 
-![Runtime Debug Walkthrough](assets/Cogic-debugMode.gif)
+![Runtime Debug Walkthrough](assets/Cogic-DebugMode.gif)
 
 ## 에러 데모
 

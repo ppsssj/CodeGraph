@@ -6,4 +6,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-04-05
+
+- Fix Runtime Debug demo image rendering on Marketplace README.
+
+## [0.0.1] - 2026-04-05
+
 - Initial release
