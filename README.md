@@ -483,3 +483,9 @@ npm run build:all
   - Svelte
   - Fastify
   - Next.js server actions
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

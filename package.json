@@ -4,6 +4,7 @@
   "displayName": "Cogic",
   "description": "Visualize code structure, calls, data flow, and framework routes inside VS Code.",
   "version": "0.0.1",
+  "license": "SEE LICENSE IN LICENSE",
   "icon": "assets/logo.png",
   "engines": {
     "vscode": "^1.108.1"
