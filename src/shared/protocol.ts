@@ -5,6 +5,7 @@ export type WebviewToExtMessage =
   | { type: "requestWorkspaceFiles" }
   | { type: "requestSelection" }
   | { type: "requestHostState" }
+  | { type: "requestAnalysisCacheState" }
   | {
       type: "switchHost";
       payload: {
@@ -39,6 +40,10 @@ export type WebviewToExtMessage =
     }
   | { type: "expandNode"; payload: { filePath: string; generation?: number } }
   | { type: "setGraphDepth"; payload: { graphDepth: number } }
+  | {
+      type: "setAnalysisCacheEnabled";
+      payload: { enabled: boolean };
+    }
   | {
       type: "debugEvent";
       payload: {
@@ -317,6 +322,12 @@ export type ExtToWebviewMessage =
       payload: {
         currentHost: "sidebar" | "panel";
         sidebarLocation: "left" | "right";
+      };
+    }
+  | {
+      type: "analysisCacheState";
+      payload: {
+        enabled: boolean;
       };
     }
   | {

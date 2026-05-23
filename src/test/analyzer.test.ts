@@ -5,6 +5,7 @@ import * as path from "path";
 import {
   analyzeTypeScriptWithTypes,
   analyzeWithWorkspace,
+  clearAnalyzerCaches,
 } from "../analyzer/analyze";
 
 function normalizeComparablePath(filePath: string | null | undefined) {
@@ -13,6 +14,80 @@ function normalizeComparablePath(filePath: string | null | undefined) {
 
 suite("Analyzer Test Suite", function () {
   this.timeout(10_000);
+
+  test("caches disk SourceFiles without mixing active unsaved text", () => {
+    clearAnalyzerCaches();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "codegraph-cache-"));
+
+    try {
+      const activeFile = path.join(root, "main.ts");
+      const helperFile = path.join(root, "helper.ts");
+      fs.writeFileSync(
+        activeFile,
+        `import { helper } from "./helper";\nexport function onDisk() { return helper(); }\n`,
+      );
+      fs.writeFileSync(helperFile, `export function helper() { return 1; }\n`);
+
+      const debugEvents: Array<{
+        event: string;
+        detail?: Record<string, unknown>;
+      }> = [];
+      const debug = (event: string, detail?: Record<string, unknown>) => {
+        debugEvents.push({ event, detail });
+      };
+
+      const first = analyzeWithWorkspace({
+        active: {
+          code: `import { helper } from "./helper";\nexport function unsavedA() { return helper(); }\n`,
+          fileName: activeFile,
+          languageId: "typescript",
+        },
+        workspaceRoot: root,
+        filePaths: [activeFile, helperFile],
+        debug,
+      });
+      const second = analyzeWithWorkspace({
+        active: {
+          code: `import { helper } from "./helper";\nexport function unsavedB() { return helper(); }\n`,
+          fileName: activeFile,
+          languageId: "typescript",
+        },
+        workspaceRoot: root,
+        filePaths: [activeFile, helperFile],
+        debug,
+      });
+
+      assert.ok(
+        first.exports.some((item) => item.name === "unsavedA"),
+        "first analysis should use active in-memory text",
+      );
+      assert.ok(
+        second.exports.some((item) => item.name === "unsavedB"),
+        "second analysis should use latest active in-memory text",
+      );
+      assert.ok(
+        debugEvents.some(
+          (item) =>
+            item.event === "analyzer.sourceFileCache.hit" &&
+            normalizeComparablePath(String(item.detail?.filePath)) ===
+              normalizeComparablePath(helperFile),
+        ),
+        "unchanged helper.ts should be served from the disk SourceFile cache",
+      );
+      assert.ok(
+        !debugEvents.some(
+          (item) =>
+            item.event === "analyzer.sourceFileCache.hit" &&
+            normalizeComparablePath(String(item.detail?.filePath)) ===
+              normalizeComparablePath(activeFile),
+        ),
+        "active file should not be served from the disk SourceFile cache",
+      );
+    } finally {
+      clearAnalyzerCaches();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   test("captures default export declarations as default", () => {
     const functionResult = analyzeTypeScriptWithTypes({

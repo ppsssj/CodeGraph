@@ -1,7 +1,12 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import * as crypto from "crypto";
 import { getWebviewHtml } from "../webview/html";
-import { analyzeWorkspaceActive } from "../analyzer";
+import {
+  analyzeWorkspaceActive,
+  clearAnalyzerCaches,
+  invalidateAnalyzerFileCaches,
+} from "../analyzer";
 import { buildPatchPreview, type GeneratedPatchPlan } from "../codegen";
 import type {
   AnalysisRequestMeta,
@@ -19,6 +24,18 @@ import {
 } from "./debugLog";
 import { RuntimeDebugBridge } from "./runtimeDebug";
 
+type DepthAnalysisResult = ReturnType<typeof analyzeWorkspaceActive>;
+
+type AnalysisCacheEntry = {
+  result: DepthAnalysisResult;
+  lastAccessedAt: number;
+};
+
+const MAX_ANALYSIS_RESULT_CACHE_ENTRIES = 40;
+const CONFIG_SECTION = "cogic";
+const ANALYSIS_CACHE_ENABLED_SETTING = "analysisCache.enabled";
+const ANALYSIS_CACHE_STATE_KEY = "cogic.analysisCache.enabled";
+
 function getGraphCounts(payload?: { nodes: unknown[]; edges: unknown[] }) {
   return {
     graphNodes: payload?.nodes.length ?? 0,
@@ -32,6 +49,20 @@ function normalizeComparablePath(filePath: string) {
 
 function normalizeDirectoryPath(filePath: string) {
   return normalizeComparablePath(path.dirname(filePath));
+}
+
+function hashText(value: string) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function cloneAnalysisResult(result: DepthAnalysisResult): DepthAnalysisResult {
+  return JSON.parse(JSON.stringify(result)) as DepthAnalysisResult;
+}
+
+function getDefaultAnalysisCacheEnabled() {
+  return vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .get<boolean>(ANALYSIS_CACHE_ENABLED_SETTING, true);
 }
 
 function clampGraphDepth(depth: number | undefined) {
@@ -130,6 +161,9 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
   if (msg.type === "requestHostState") {
     return {};
   }
+  if (msg.type === "requestAnalysisCacheState") {
+    return {};
+  }
   if (msg.type === "switchHost") {
     return {
       target: msg.payload.target,
@@ -183,6 +217,11 @@ function summarizeInboundMessage(msg: WebviewToExtMessage) {
   if (msg.type === "setGraphDepth") {
     return {
       graphDepth: msg.payload.graphDepth,
+    };
+  }
+  if (msg.type === "setAnalysisCacheEnabled") {
+    return {
+      enabled: msg.payload.enabled,
     };
   }
   if (msg.type === "requestPatchPreview") {
@@ -239,6 +278,7 @@ export class CodeGraphPanel {
   // cache workspace file list (ts/js)
   private cachedFilePaths: string[] = [];
   private cachedAt = 0;
+  private readonly analysisResultCache = new Map<string, AnalysisCacheEntry>();
   private graphDepth = 0;
 
   private constructor(
@@ -358,6 +398,9 @@ export class CodeGraphPanel {
           if (msg.type === "requestHostState") {
             return this.postHostState();
           }
+          if (msg.type === "requestAnalysisCacheState") {
+            return this.postAnalysisCacheState();
+          }
           if (msg.type === "switchHost") {
             return await this.switchHost(
               msg.payload.target,
@@ -424,6 +467,9 @@ export class CodeGraphPanel {
             this.graphDepth = clampGraphDepth(msg.payload.graphDepth);
             return;
           }
+          if (msg.type === "setAnalysisCacheEnabled") {
+            return await this.setAnalysisCacheEnabled(msg.payload.enabled);
+          }
           if (msg.type === "debugEvent") {
             return this.handleForwardedWebviewDebug(msg.payload);
           }
@@ -457,6 +503,7 @@ export class CodeGraphPanel {
     this.postActiveFile();
     void this.postWorkspaceFiles();
     this.postSelection();
+    this.postAnalysisCacheState();
     const runtimePayload = this.runtimeDebugBridge?.getLastPayload();
     if (runtimePayload) {
       this.panel.webview.postMessage({
@@ -532,6 +579,8 @@ export class CodeGraphPanel {
     });
 
     const subChange = vscode.workspace.onDidChangeTextDocument((e) => {
+      this.invalidateCachesForFiles("document-change", [e.document.fileName]);
+
       const active =
         this.lastTextEditor?.document ??
         vscode.window.activeTextEditor?.document;
@@ -556,6 +605,8 @@ export class CodeGraphPanel {
     });
 
     const subSave = vscode.workspace.onDidSaveTextDocument((doc) => {
+      this.invalidateCachesForFiles("document-save", [doc.fileName]);
+
       const active =
         this.lastTextEditor?.document ??
         vscode.window.activeTextEditor?.document;
@@ -583,15 +634,54 @@ export class CodeGraphPanel {
       this.postSelection();
     });
 
+    const subConfig = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration("cogic.analysisCache.enabled")) {
+        return;
+      }
+
+      this.invalidateCachesForFiles("analysis-cache-setting-change");
+      pushPanelDebugEvent("analysis.cache.setting.changed", {
+        enabled: this.isAnalysisCacheEnabled(),
+      });
+      this.postAnalysisCacheState();
+    });
+
     // invalidate cache when files change (coarse)
-    const subFs = vscode.workspace.onDidCreateFiles(() =>
-      this.invalidateAndPostWorkspaceFiles(),
+    const subFs = vscode.workspace.onDidCreateFiles((e) =>
+      this.invalidateAndPostWorkspaceFiles("files-created", e.files.map((uri) => uri.fsPath)),
     );
-    const subFs2 = vscode.workspace.onDidDeleteFiles(() =>
-      this.invalidateAndPostWorkspaceFiles(),
+    const subFs2 = vscode.workspace.onDidDeleteFiles((e) =>
+      this.invalidateAndPostWorkspaceFiles("files-deleted", e.files.map((uri) => uri.fsPath)),
     );
-    const subFs3 = vscode.workspace.onDidRenameFiles(() =>
-      this.invalidateAndPostWorkspaceFiles(),
+    const subFs3 = vscode.workspace.onDidRenameFiles((e) =>
+      this.invalidateAndPostWorkspaceFiles(
+        "files-renamed",
+        e.files.flatMap((file) => [file.oldUri.fsPath, file.newUri.fsPath]),
+      ),
+    );
+    const sourceFileWatcher = vscode.workspace.createFileSystemWatcher(
+      "**/*.{ts,tsx,js,jsx}",
+    );
+    const tsconfigWatcher = vscode.workspace.createFileSystemWatcher(
+      "**/tsconfig*.json",
+    );
+    const subWatcherChange = sourceFileWatcher.onDidChange((uri) =>
+      this.invalidateCachesForFiles("filesystem-change", [uri.fsPath]),
+    );
+    const subWatcherCreate = sourceFileWatcher.onDidCreate((uri) =>
+      this.invalidateAndPostWorkspaceFiles("filesystem-create", [uri.fsPath]),
+    );
+    const subWatcherDelete = sourceFileWatcher.onDidDelete((uri) =>
+      this.invalidateAndPostWorkspaceFiles("filesystem-delete", [uri.fsPath]),
+    );
+    const subTsconfigChange = tsconfigWatcher.onDidChange((uri) =>
+      this.invalidateCachesForFiles("tsconfig-change", [uri.fsPath]),
+    );
+    const subTsconfigCreate = tsconfigWatcher.onDidCreate((uri) =>
+      this.invalidateCachesForFiles("tsconfig-create", [uri.fsPath]),
+    );
+    const subTsconfigDelete = tsconfigWatcher.onDidDelete((uri) =>
+      this.invalidateCachesForFiles("tsconfig-delete", [uri.fsPath]),
     );
 
     this.panel.onDidDispose(() => {
@@ -602,6 +692,15 @@ export class CodeGraphPanel {
       subFs.dispose();
       subFs2.dispose();
       subFs3.dispose();
+      subConfig.dispose();
+      subWatcherChange.dispose();
+      subWatcherCreate.dispose();
+      subWatcherDelete.dispose();
+      subTsconfigChange.dispose();
+      subTsconfigCreate.dispose();
+      subTsconfigDelete.dispose();
+      sourceFileWatcher.dispose();
+      tsconfigWatcher.dispose();
       if (this.analysisTimer) {
         clearTimeout(this.analysisTimer);
       }
@@ -633,6 +732,36 @@ export class CodeGraphPanel {
       type: "hostState",
       payload,
     } satisfies ExtToWebviewMessage);
+  }
+
+  private postAnalysisCacheState() {
+    this.panel.webview.postMessage({
+      type: "analysisCacheState",
+      payload: {
+        enabled: this.isAnalysisCacheEnabled(),
+      },
+    } satisfies ExtToWebviewMessage);
+  }
+
+  private isAnalysisCacheEnabled() {
+    return (
+      this.context.workspaceState.get<boolean>(ANALYSIS_CACHE_STATE_KEY) ??
+      getDefaultAnalysisCacheEnabled()
+    );
+  }
+
+  private async setAnalysisCacheEnabled(enabled: boolean) {
+    const current = this.isAnalysisCacheEnabled();
+    await this.context.workspaceState.update(ANALYSIS_CACHE_STATE_KEY, enabled);
+
+    if (current === enabled) {
+      this.postAnalysisCacheState();
+      return;
+    }
+
+    this.invalidateCachesForFiles("analysis-cache-setting-update");
+    pushPanelDebugEvent("analysis.cache.setting.updated", { enabled });
+    this.postAnalysisCacheState();
   }
 
   private async switchHost(target: HostKind, sidebarLocation?: SidebarLocation) {
@@ -679,6 +808,27 @@ export class CodeGraphPanel {
   private invalidateWorkspaceCache() {
     this.cachedAt = 0;
     this.cachedFilePaths = [];
+  }
+
+  private invalidateCachesForFiles(
+    reason: string,
+    filePaths: readonly string[] = [],
+  ) {
+    const normalizedFilePaths = filePaths.filter((filePath) => filePath.trim());
+    const analysisEntries = this.analysisResultCache.size;
+
+    this.analysisResultCache.clear();
+    if (normalizedFilePaths.length > 0) {
+      invalidateAnalyzerFileCaches(normalizedFilePaths, pushPanelDebugEvent);
+    } else {
+      clearAnalyzerCaches(pushPanelDebugEvent);
+    }
+
+    pushPanelDebugEvent("analysis.cache.invalidate", {
+      reason,
+      files: normalizedFilePaths.length,
+      analysisEntries,
+    });
   }
 
   private suppressAutoAnalysis(uri: string) {
@@ -747,7 +897,11 @@ export class CodeGraphPanel {
     };
   }
 
-  private invalidateAndPostWorkspaceFiles() {
+  private invalidateAndPostWorkspaceFiles(
+    reason = "workspace-files",
+    filePaths: readonly string[] = [],
+  ) {
+    this.invalidateCachesForFiles(reason, filePaths);
     this.invalidateWorkspaceCache();
     void this.postWorkspaceFiles();
   }
@@ -1117,6 +1271,87 @@ export class CodeGraphPanel {
     } satisfies ExtToWebviewMessage);
   }
 
+  private getAnalysisCacheKey(args: {
+    code: string;
+    fileName: string;
+    languageId: string;
+    traceMode: boolean;
+    graphDepth: number;
+    traceScope: TraceScope;
+  }, workspaceRoot: string | null, filePaths: readonly string[]) {
+    const workspaceFilesHash = hashText(
+      filePaths.map((filePath) => normalizeComparablePath(filePath)).sort().join("\n"),
+    );
+
+    return JSON.stringify({
+      version: 1,
+      fileName: normalizeComparablePath(args.fileName),
+      languageId: args.languageId,
+      codeHash: hashText(args.code),
+      graphDepth: clampGraphDepth(args.graphDepth),
+      traceMode: args.traceMode,
+      traceScope: args.traceScope,
+      workspaceRoot: workspaceRoot ? normalizeComparablePath(workspaceRoot) : null,
+      workspaceFilesHash,
+    });
+  }
+
+  private getCachedAnalysisResult(
+    cacheKey: string,
+    args: {
+      fileName: string;
+      graphDepth: number;
+      traceMode: boolean;
+      traceScope: TraceScope;
+    },
+  ) {
+    const cached = this.analysisResultCache.get(cacheKey);
+    if (!cached) {
+      pushPanelDebugEvent("analysis.cache.miss", {
+        filePath: args.fileName,
+        graphDepth: args.graphDepth,
+        traceMode: args.traceMode,
+        traceScope: args.traceScope,
+      });
+      return null;
+    }
+
+    cached.lastAccessedAt = Date.now();
+    pushPanelDebugEvent("analysis.cache.hit", {
+      filePath: args.fileName,
+      graphDepth: args.graphDepth,
+      traceMode: args.traceMode,
+      traceScope: args.traceScope,
+      entries: this.analysisResultCache.size,
+    });
+    return cloneAnalysisResult(cached.result);
+  }
+
+  private storeAnalysisResult(cacheKey: string, result: DepthAnalysisResult) {
+    this.analysisResultCache.set(cacheKey, {
+      result: cloneAnalysisResult(result),
+      lastAccessedAt: Date.now(),
+    });
+    this.pruneAnalysisResultCache();
+    pushPanelDebugEvent("analysis.cache.store", {
+      entries: this.analysisResultCache.size,
+    });
+  }
+
+  private pruneAnalysisResultCache() {
+    if (this.analysisResultCache.size <= MAX_ANALYSIS_RESULT_CACHE_ENTRIES) {
+      return;
+    }
+
+    const sorted = [...this.analysisResultCache.entries()].sort(
+      (a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt,
+    );
+    const removeCount = this.analysisResultCache.size - MAX_ANALYSIS_RESULT_CACHE_ENTRIES;
+    for (const [cacheKey] of sorted.slice(0, removeCount)) {
+      this.analysisResultCache.delete(cacheKey);
+    }
+  }
+
   private async selectWorkspaceFile(
     filePath: string,
     traceMode = false,
@@ -1156,6 +1391,25 @@ export class CodeGraphPanel {
   }) {
     const workspaceRoot = this.getWorkspaceRoot();
     const filePaths = await this.getWorkspaceFilePaths();
+    const cacheEnabled = this.isAnalysisCacheEnabled();
+    const cacheKey = cacheEnabled
+      ? this.getAnalysisCacheKey(args, workspaceRoot, filePaths)
+      : null;
+
+    if (cacheKey) {
+      const cached = this.getCachedAnalysisResult(cacheKey, args);
+      if (cached) {
+        return cached;
+      }
+    } else {
+      pushPanelDebugEvent("analysis.cache.disabled", {
+        filePath: args.fileName,
+        graphDepth: args.graphDepth,
+        traceMode: args.traceMode,
+        traceScope: args.traceScope,
+      });
+    }
+
     const comparableWorkspacePaths = new Set(
       filePaths.map((filePath) => normalizeComparablePath(filePath)),
     );
@@ -1171,87 +1425,92 @@ export class CodeGraphPanel {
       },
       workspaceRoot,
       filePaths,
+      debug: pushPanelDebugEvent,
+      cacheEnabled,
     });
 
+    let result: DepthAnalysisResult;
+
     if (!baseResult.graph) {
-      return baseResult;
-    }
-
-    if (args.traceMode && args.traceScope === "single-file") {
-      return {
+      result = baseResult;
+    } else if (args.traceMode && args.traceScope === "single-file") {
+      result = {
         ...baseResult,
         graph: pruneGraphToFile(baseResult.graph, args.fileName),
       };
-    }
-
-    if (args.graphDepth <= 0) {
-      return {
+    } else if (args.graphDepth <= 0) {
+      result = {
         ...baseResult,
         graph: pruneGraphToFile(baseResult.graph, args.fileName),
       };
-    }
+    } else if (args.graphDepth === 1) {
+      result = baseResult;
+    } else {
+      let mergedGraph = baseResult.graph;
+      let mergedTrace = baseResult.trace;
+      let frontier = this.collectDepthExpansionFiles(
+        baseResult.graph,
+        comparableWorkspacePaths,
+        analyzedFiles,
+      );
 
-    if (args.graphDepth === 1) {
-      return baseResult;
-    }
-
-    let mergedGraph = baseResult.graph;
-    let mergedTrace = baseResult.trace;
-    let frontier = this.collectDepthExpansionFiles(
-      baseResult.graph,
-      comparableWorkspacePaths,
-      analyzedFiles,
-    );
-
-    for (let hop = 0; hop < args.graphDepth - 1; hop += 1) {
-      if (frontier.length === 0) {
-        break;
-      }
-
-      const nextFrontier = new Set<string>();
-
-      for (const targetFile of frontier) {
-        const comparable = normalizeComparablePath(targetFile);
-        analyzedFiles.add(comparable);
-
-        try {
-          const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(targetFile));
-          const code = new TextDecoder("utf-8").decode(bytes);
-          const expandedResult = analyzeWorkspaceActive({
-            active: {
-              code,
-              fileName: targetFile,
-              languageId: guessLanguageId(targetFile),
-            },
-            workspaceRoot,
-            filePaths,
-          });
-
-          mergedGraph = mergeGraphPayload(mergedGraph, expandedResult.graph) ?? mergedGraph;
-          if (args.traceMode) {
-            mergedTrace = mergeTracePayload(mergedTrace, expandedResult.trace) ?? mergedTrace;
-          }
-
-          for (const discoveredFile of this.collectDepthExpansionFiles(
-            expandedResult.graph,
-            comparableWorkspacePaths,
-            analyzedFiles,
-          )) {
-            nextFrontier.add(discoveredFile);
-          }
-        } catch {
-          // ignore unreadable expansion targets
+      for (let hop = 0; hop < args.graphDepth - 1; hop += 1) {
+        if (frontier.length === 0) {
+          break;
         }
+
+        const nextFrontier = new Set<string>();
+
+        for (const targetFile of frontier) {
+          const comparable = normalizeComparablePath(targetFile);
+          analyzedFiles.add(comparable);
+
+          try {
+            const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(targetFile));
+            const code = new TextDecoder("utf-8").decode(bytes);
+            const expandedResult = analyzeWorkspaceActive({
+              active: {
+                code,
+                fileName: targetFile,
+                languageId: guessLanguageId(targetFile),
+              },
+              workspaceRoot,
+              filePaths,
+              debug: pushPanelDebugEvent,
+              cacheEnabled,
+            });
+
+            mergedGraph = mergeGraphPayload(mergedGraph, expandedResult.graph) ?? mergedGraph;
+            if (args.traceMode) {
+              mergedTrace = mergeTracePayload(mergedTrace, expandedResult.trace) ?? mergedTrace;
+            }
+
+            for (const discoveredFile of this.collectDepthExpansionFiles(
+              expandedResult.graph,
+              comparableWorkspacePaths,
+              analyzedFiles,
+            )) {
+              nextFrontier.add(discoveredFile);
+            }
+          } catch {
+            // ignore unreadable expansion targets
+          }
+        }
+
+        frontier = [...nextFrontier];
       }
 
-      frontier = [...nextFrontier];
+      result = {
+        ...baseResult,
+        graph: mergedGraph,
+        trace: args.traceMode ? mergedTrace : baseResult.trace,
+      };
     }
 
-    return {
-      ...baseResult,
-      graph: mergedGraph,
-      trace: args.traceMode ? mergedTrace : baseResult.trace,
-    };
+    if (cacheKey) {
+      this.storeAnalysisResult(cacheKey, result);
+    }
+    return result;
   }
 
   private collectDepthExpansionFiles(

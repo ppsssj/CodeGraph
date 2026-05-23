@@ -74,6 +74,10 @@ type HostStatePayload = Extract<
   ExtToWebviewMessage,
   { type: "hostState" }
 >["payload"];
+type AnalysisCacheStatePayload = Extract<
+  ExtToWebviewMessage,
+  { type: "analysisCacheState" }
+>["payload"];
 type NoticeSeverity = UINotice["severity"];
 type OpenLocationPayload = Extract<
   WebviewToExtMessage,
@@ -656,6 +660,8 @@ export default function App() {
     currentHost: "panel",
     sidebarLocation: "left",
   });
+  const [analysisCacheState, setAnalysisCacheState] =
+    useState<AnalysisCacheStatePayload>({ enabled: true });
   const [activeFile, setActiveFile] = useState<ActiveFilePayload>(null);
   const [workspaceFiles, setWorkspaceFiles] =
     useState<WorkspaceFilesPayload | null>(null);
@@ -1121,6 +1127,11 @@ export default function App() {
         return;
       }
 
+      if (msg.type === "analysisCacheState") {
+        setAnalysisCacheState(msg.payload);
+        return;
+      }
+
       if (msg.type === "activeFile") {
         setActiveFile(msg.payload);
         return;
@@ -1291,6 +1302,7 @@ export default function App() {
     postMessage("app.mount", { type: "requestWorkspaceFiles" });
     postMessage("app.mount", { type: "requestSelection" });
     postMessage("app.mount", { type: "requestHostState" });
+    postMessage("app.mount", { type: "requestAnalysisCacheState" });
 
     return () => window.removeEventListener("message", onMessage);
   }, [clearSelectedNodes, finishAnalysisLoading, postMessage, showToast, syncGraphRoot]);
@@ -2630,6 +2642,14 @@ export default function App() {
             postMessage("inspector.hostMode.change", {
               type: "switchHost",
               payload: { target, sidebarLocation },
+            });
+          }}
+          analysisCacheEnabled={analysisCacheState.enabled}
+          onAnalysisCacheEnabledChange={(enabled) => {
+            setAnalysisCacheState({ enabled });
+            postMessage("inspector.analysisCache.change", {
+              type: "setAnalysisCacheEnabled",
+              payload: { enabled },
             });
           }}
           onToggleCollapsed={() => setInspectorOpen((v) => !v)}

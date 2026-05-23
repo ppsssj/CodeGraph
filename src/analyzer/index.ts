@@ -1,6 +1,10 @@
 import { analyzeTypeScriptWithTypes, analyzeWithWorkspace } from "./analyze";
 import type { FrameworkSemanticAdapter } from "./adapters";
 export {
+  clearAnalyzerCaches,
+  invalidateAnalyzerFileCaches,
+} from "./analyze";
+export {
   defaultFrameworkSemanticAdapters,
   resolveFrameworkCallbackHook,
   resolveFrameworkDecoratedMethodOwner,
@@ -18,6 +22,8 @@ export function analyzeActiveFile(args: {
   fileName: string;
   languageId: string;
   adapters?: readonly FrameworkSemanticAdapter[];
+  debug?: (event: string, detail?: Record<string, unknown>) => void;
+  cacheEnabled?: boolean;
 }) {
   // backward-compatible entrypoint (single-file only)
   return analyzeTypeScriptWithTypes(args);
@@ -34,6 +40,8 @@ export function analyzeWorkspaceActive(args: {
   workspaceRoot: string | null;
   filePaths: string[]; // ts/js file paths in the workspace (absolute)
   adapters?: readonly FrameworkSemanticAdapter[];
+  debug?: (event: string, detail?: Record<string, unknown>) => void;
+  cacheEnabled?: boolean;
 }) {
   return analyzeWithWorkspace(args);
 }

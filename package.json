@@ -68,7 +68,17 @@
         "command": "codegraph.openSidebar",
         "title": "Cogic: Focus Sidebar View"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Cogic",
+      "properties": {
+        "cogic.analysisCache.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable in-memory caching for repeated Cogic analysis and TypeScript SourceFile parsing."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run lint:all && npm run build:all",

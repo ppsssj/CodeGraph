@@ -763,7 +763,7 @@
   min-height: 0;
 }
 
-.inspector--bottom .inspectorSettingsCard:last-child {
+.inspector--bottom .inspectorSettingsCard--sections {
   flex-basis: clamp(380px, 34vw, 520px);
 }
 
@@ -791,6 +791,84 @@
 .inspectorSettingsOptions {
   display: grid;
   gap: 8px;
+}
+
+.inspectorSettingToggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface2) 72%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inspectorSettingToggleText {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.inspectorSettingToggleText strong {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.inspectorSettingToggleText small {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.inspectorSettingToggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: var(--surfaceActive);
+}
+
+.inspectorSettingToggle:focus-visible {
+  outline: 2px solid var(--outlineStrong);
+  outline-offset: 2px;
+}
+
+.inspectorSwitch {
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--outlineSubtle);
+  background: var(--surface2);
+  position: relative;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.inspectorSwitch::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+
+.inspectorSwitch.isActive {
+  border-color: var(--outlineStrong);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface1));
+}
+
+.inspectorSwitch.isActive::after {
+  transform: translateX(18px);
+  background: color-mix(in srgb, var(--accent) 76%, var(--fg));
 }
 
 .inspectorSectionList {

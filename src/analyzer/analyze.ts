@@ -19,6 +19,49 @@ import type {
   GraphTraceEvent,
 } from "../shared/protocol";
 
+type AnalyzerDebugLogger = (
+  event: string,
+  detail?: Record<string, unknown>,
+) => void;
+
+type CachedDiskSourceFile = {
+  fileName: string;
+  mtimeMs: number;
+  size: number;
+  scriptKind: ts.ScriptKind;
+  languageVersionKey: string;
+  sourceFile: ts.SourceFile;
+  lastAccessedAt: number;
+};
+
+const MAX_DISK_SOURCE_FILE_CACHE_ENTRIES = 800;
+const diskSourceFileCache = new Map<string, CachedDiskSourceFile>();
+
+export function clearAnalyzerCaches(debug?: AnalyzerDebugLogger) {
+  const sourceFiles = diskSourceFileCache.size;
+  diskSourceFileCache.clear();
+  debug?.("analyzer.sourceFileCache.clear", { sourceFiles });
+}
+
+export function invalidateAnalyzerFileCaches(
+  filePaths: readonly string[],
+  debug?: AnalyzerDebugLogger,
+) {
+  let sourceFiles = 0;
+
+  for (const filePath of filePaths) {
+    const cacheKey = normalizeCachePath(filePath);
+    if (diskSourceFileCache.delete(cacheKey)) {
+      sourceFiles += 1;
+    }
+  }
+
+  debug?.("analyzer.sourceFileCache.invalidate", {
+    files: filePaths.length,
+    sourceFiles,
+  });
+}
+
 /**
  * Single-file analysis (in-memory program with only the active file as root).
  * Keeps behavior stable for MVP / fallback.
@@ -28,6 +71,8 @@ export function analyzeTypeScriptWithTypes(args: {
   fileName: string;
   languageId: string;
   adapters?: readonly FrameworkSemanticAdapter[];
+  debug?: AnalyzerDebugLogger;
+  cacheEnabled?: boolean;
 }): {
   imports: Array<{
     source: string;
@@ -49,6 +94,8 @@ export function analyzeTypeScriptWithTypes(args: {
     fileName,
     languageId,
     adapters = defaultFrameworkSemanticAdapters,
+    debug,
+    cacheEnabled = true,
   } = args;
 
   const scriptKind = pickScriptKind(fileName, languageId);
@@ -86,11 +133,14 @@ export function analyzeTypeScriptWithTypes(args: {
           scriptKind,
         );
       }
-      return defaultHost.getSourceFile(
+      return getCachedDiskSourceFile(
         requested,
         languageVersion,
         onError,
         shouldCreateNewSourceFile,
+        defaultHost,
+        debug,
+        cacheEnabled,
       );
     },
   };
@@ -151,6 +201,8 @@ export function analyzeWithWorkspace(args: {
   workspaceRoot: string | null;
   filePaths: string[];
   adapters?: readonly FrameworkSemanticAdapter[];
+  debug?: AnalyzerDebugLogger;
+  cacheEnabled?: boolean;
 }): {
   imports: Array<{
     source: string;
@@ -177,6 +229,8 @@ export function analyzeWithWorkspace(args: {
     workspaceRoot,
     filePaths,
     adapters = defaultFrameworkSemanticAdapters,
+    debug,
+    cacheEnabled = true,
   } = args;
   const activeFile = active.fileName;
 
@@ -186,6 +240,9 @@ export function analyzeWithWorkspace(args: {
       code: active.code,
       fileName: active.fileName,
       languageId: active.languageId,
+      adapters,
+      debug,
+      cacheEnabled,
     });
     return {
       ...r,
@@ -235,11 +292,14 @@ export function analyzeWithWorkspace(args: {
           scriptKind,
         );
       }
-      return defaultHost.getSourceFile(
+      return getCachedDiskSourceFile(
         requested,
         languageVersion,
         onError,
         shouldCreateNewSourceFile,
+        defaultHost,
+        debug,
+        cacheEnabled,
       );
     },
   };
@@ -259,6 +319,9 @@ export function analyzeWithWorkspace(args: {
       code: active.code,
       fileName: active.fileName,
       languageId: active.languageId,
+      adapters,
+      debug,
+      cacheEnabled,
     });
     return {
       ...r,
@@ -506,6 +569,156 @@ function buildWorkspaceRoots(args: {
 
 function samePath(a: string, b: string) {
   return path.resolve(a) === path.resolve(b);
+}
+
+function normalizeCachePath(fileName: string) {
+  const normalized = path.resolve(fileName);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function getCachedDiskSourceFile(
+  requested: string,
+  languageVersion: ts.ScriptTarget | ts.CreateSourceFileOptions,
+  onError: ((message: string) => void) | undefined,
+  shouldCreateNewSourceFile: boolean | undefined,
+  defaultHost: ts.CompilerHost,
+  debug?: AnalyzerDebugLogger,
+  cacheEnabled = true,
+) {
+  if (!cacheEnabled) {
+    debug?.("analyzer.sourceFileCache.disabled", {
+      filePath: requested,
+    });
+    return defaultHost.getSourceFile(
+      requested,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    );
+  }
+
+  if (shouldCreateNewSourceFile) {
+    debug?.("analyzer.sourceFileCache.bypass", {
+      filePath: requested,
+      reason: "shouldCreateNewSourceFile",
+    });
+    return defaultHost.getSourceFile(
+      requested,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    );
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(requested);
+  } catch {
+    return defaultHost.getSourceFile(
+      requested,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    );
+  }
+
+  if (!stat.isFile()) {
+    return defaultHost.getSourceFile(
+      requested,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    );
+  }
+
+  const cacheKey = normalizeCachePath(requested);
+  const scriptKind = pickScriptKind(requested, "");
+  const languageVersionKey = getLanguageVersionCacheKey(languageVersion);
+  const cached = diskSourceFileCache.get(cacheKey);
+
+  if (
+    cached &&
+    cached.mtimeMs === stat.mtimeMs &&
+    cached.size === stat.size &&
+    cached.scriptKind === scriptKind &&
+    cached.languageVersionKey === languageVersionKey
+  ) {
+    cached.lastAccessedAt = Date.now();
+    debug?.("analyzer.sourceFileCache.hit", {
+      filePath: requested,
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      scriptKind,
+    });
+    return cached.sourceFile;
+  }
+
+  debug?.(cached ? "analyzer.sourceFileCache.stale" : "analyzer.sourceFileCache.miss", {
+    filePath: requested,
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    scriptKind,
+  });
+
+  const sourceText = defaultHost.readFile(requested);
+  if (sourceText === undefined) {
+    onError?.(`File not found: ${requested}`);
+    return undefined;
+  }
+
+  const sourceFile = ts.createSourceFile(
+    requested,
+    sourceText,
+    languageVersion,
+    true,
+    scriptKind,
+  );
+
+  diskSourceFileCache.set(cacheKey, {
+    fileName: requested,
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    scriptKind,
+    languageVersionKey,
+    sourceFile,
+    lastAccessedAt: Date.now(),
+  });
+  pruneDiskSourceFileCache();
+  debug?.("analyzer.sourceFileCache.store", {
+    filePath: requested,
+    entries: diskSourceFileCache.size,
+  });
+
+  return sourceFile;
+}
+
+function getLanguageVersionCacheKey(
+  languageVersion: ts.ScriptTarget | ts.CreateSourceFileOptions,
+) {
+  if (typeof languageVersion === "number") {
+    return `target:${languageVersion}`;
+  }
+
+  return [
+    `target:${languageVersion.languageVersion}`,
+    `module:${languageVersion.impliedNodeFormat ?? "default"}`,
+    `jsdoc:${languageVersion.jsDocParsingMode ?? "default"}`,
+    `external:${languageVersion.setExternalModuleIndicator ? "custom" : "default"}`,
+  ].join("|");
+}
+
+function pruneDiskSourceFileCache() {
+  if (diskSourceFileCache.size <= MAX_DISK_SOURCE_FILE_CACHE_ENTRIES) {
+    return;
+  }
+
+  const sorted = [...diskSourceFileCache.entries()].sort(
+    (a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt,
+  );
+  const removeCount = diskSourceFileCache.size - MAX_DISK_SOURCE_FILE_CACHE_ENTRIES;
+  for (const [cacheKey] of sorted.slice(0, removeCount)) {
+    diskSourceFileCache.delete(cacheKey);
+  }
 }
 
 type FileTargetLocation = {

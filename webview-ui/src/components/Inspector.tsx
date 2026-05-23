@@ -134,6 +134,8 @@ type Props = {
   effectivePlacement: EffectiveInspectorPlacement;
   onHostModeChange: (mode: HostMode, sidebarLocation?: SidebarLocation) => void;
   onPlacementChange: (placement: InspectorPlacement) => void;
+  analysisCacheEnabled: boolean;
+  onAnalysisCacheEnabledChange: (enabled: boolean) => void;
   onToggleCollapsed?: () => void;
 };
 
@@ -485,6 +487,8 @@ export function Inspector({
   effectivePlacement,
   onHostModeChange,
   onPlacementChange,
+  analysisCacheEnabled,
+  onAnalysisCacheEnabledChange,
   onToggleCollapsed,
 }: Props) {
   const [settingsMode, setSettingsMode] = useState(false);
@@ -1350,8 +1354,8 @@ export function Inspector({
     >
       <div className="inspectorHeader">
         <div>
-          <h1>{settingsMode ? "Inspector Settings" : "Inspector"}</h1>
-          <p>{settingsMode ? "LAYOUT AND SECTIONS" : "COMPONENT ANALYSIS"}</p>
+          <h1>{settingsMode ? "Settings" : "Inspector"}</h1>
+          <p>{settingsMode ? "LAYOUT, SECTIONS, AND ANALYSIS" : "COMPONENT ANALYSIS"}</p>
         </div>
 
         <div className="inspectorHeaderActions">
@@ -1376,7 +1380,7 @@ export function Inspector({
             <button
               className="iconBtn subtle"
               type="button"
-              title="Inspector Settings"
+              title="Settings"
               onClick={() => setSettingsMode(true)}
             >
               <Settings className="icon" />
@@ -1514,7 +1518,7 @@ export function Inspector({
                 </div>
               </section>
 
-              <section className="inspectorSettingsCard">
+              <section className="inspectorSettingsCard inspectorSettingsCard--sections">
                 <div className="inspectorSettingsCardHeader">
                   <div>
                     <h2>Inspector Sections</h2>
@@ -1619,6 +1623,44 @@ export function Inspector({
                   })}
                 </div>
               </section>
+
+              <section className="inspectorSettingsCard">
+                <div className="inspectorSettingsCardHeader">
+                  <div>
+                    <h2>Analysis Cache</h2>
+                    <p>
+                      Reuse repeated analysis results and unchanged TypeScript SourceFiles.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  className="inspectorSettingToggle"
+                  type="button"
+                  role="switch"
+                  aria-checked={analysisCacheEnabled}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onAnalysisCacheEnabledChange(!analysisCacheEnabled);
+                  }}
+                >
+                  <span className="inspectorSettingToggleText">
+                    <strong>Enable Cache</strong>
+                    <small>
+                      Turn this off when comparing raw analyzer behavior or debugging stale results.
+                    </small>
+                  </span>
+                  <span
+                    className={[
+                      "inspectorSwitch",
+                      analysisCacheEnabled ? "isActive" : "",
+                    ]
+                      .join(" ")
+                      .trim()}
+                    aria-hidden="true"
+                  />
+                </button>
+              </section>
             </div>
           ) : visibleOrderedSections.length > 0 ? (
             visibleOrderedSections.map((key) => (
@@ -1632,7 +1674,7 @@ export function Inspector({
                 type="button"
                 onClick={() => setSettingsMode(true)}
               >
-                Open Inspector Settings
+                Open Settings
               </button>
             </div>
           )}

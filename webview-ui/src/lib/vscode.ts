@@ -72,6 +72,7 @@ export function isExtToWebviewMessage(x: unknown): x is ExtToWebviewMessage {
   const t = (x as { type?: unknown }).type;
   return (
     t === "hostState" ||
+    t === "analysisCacheState" ||
     t === "activeFile" ||
     t === "workspaceFiles" ||
     t === "selection" ||
