@@ -494,7 +494,7 @@
 /* Controls */
 .canvasControls {
   position: absolute;
-  right: 14px;
+  right: 20px;
   top: 14px;
   display: flex;
   flex-direction: column;
@@ -506,19 +506,23 @@
   width: 34px;
   height: 34px;
   border-radius: 12px;
-  border: 1px solid var(--outlineSubtle);
-  background: color-mix(in srgb, var(--surfaceCanvas) 72%, transparent);
+  border: 0;
+  background: transparent;
   color: var(--textSoft);
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+  transition: transform 140ms ease, background 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+
+.iconBtn > svg {
+  transform: translateX(-1px);
 }
 
 .iconBtn:hover {
-  transform: translateY(-1px);
-  border-color: var(--outlineStrong);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surfaceCanvas));
+  transform: scale(1.14);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: color-mix(in srgb, var(--fg) 96%, transparent);
 }
 
 .iconBtn:disabled {
@@ -528,8 +532,7 @@
 
 .iconBtn:disabled:hover {
   transform: none;
-  border-color: var(--outlineSubtle);
-  background: color-mix(in srgb, var(--surfaceCanvas) 72%, transparent);
+  background: transparent;
 }
 
 /* Empty state */

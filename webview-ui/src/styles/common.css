@@ -34,24 +34,34 @@
   height: 32px;
   width: 32px;
   border-radius: 6px;
-  border: 1px solid transparent;
-  background: var(--inputBg);
+  border: 0;
+  background: transparent;
   color: var(--fg);
   cursor: pointer;
   display: grid;
   place-items: center;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.iconBtn > svg {
+  transform: translateX(-1px);
 }
 
 .iconBtn:hover {
-  background: var(--surfaceHover);
+  transform: scale(1.12);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
 }
 
 .iconBtn.subtle {
   background: transparent;
-  border-color: transparent;
 }
 
 .iconBtn.subtle:hover {
+  transform: scale(1.12);
   background: color-mix(in srgb, var(--fg) 6%, transparent);
 }
 

@@ -35,7 +35,7 @@ body.vscode-high-contrast .logoDark {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
+  padding: 0 20px 0 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   gap: 12px;
@@ -370,8 +370,7 @@ body.vscode-high-contrast .logoDark {
 }
 
 .iconBtn--activeMenu {
-  border-color: var(--border);
-  background: var(--accentSoft);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .topbar--traceOn {
@@ -389,8 +388,7 @@ body.vscode-high-contrast .logoDark {
 
 .iconBtn--traceOn {
   position: relative;
-  border-color: var(--outlineStrong);
-  background: var(--accentSoft);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accentStrong);
 }
 

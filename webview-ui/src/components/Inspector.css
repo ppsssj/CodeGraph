@@ -31,11 +31,11 @@
 }
 
 .inspector--bottom .inspectorHeader {
-  padding: 10px 14px 8px;
+  padding: 10px 20px 8px 14px;
 }
 
 .inspectorHeader {
-  padding: 14px;
+  padding: 14px 20px 14px 14px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -64,6 +64,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-right: 2px;
 }
 
 .inspectorSettingsWrap {
@@ -644,8 +645,8 @@
 }
 
 .iconBtn--active {
-  border-color: var(--outlineStrong);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface2));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accentStrong);
 }
 
 .inspectorMenu {
