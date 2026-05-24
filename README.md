@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  VS Code 안에서 TypeScript/JavaScript 코드를 정적 분석하고, 그래프 형태로 탐색하기 위한 확장과 Webview UI입니다.
+  Visualize TypeScript and JavaScript code structure, calls, data flow, framework routes, and runtime context inside VS Code.
 </p>
 
 <p align="center">
@@ -16,437 +16,202 @@
 
 ---
 
-## 개요
+## Overview
 
-Cogic는 현재 열려 있는 파일과 워크스페이스 파일들을 분석해 다음 정보를 그래프로 보여줍니다.
+Cogic is a VS Code extension that analyzes the active file and nearby workspace files, then renders an interactive graph of your codebase.
 
-- 코드 엔티티: `file`, `function`, `method`, `class`, `interface`, `type`, `enum`, `external`
-- 관계: `calls`, `constructs`, `references`, `updates`, `dataflow`
-- 시각 계층: `folder -> child folder -> file -> symbol`
+It can show:
 
-Cogic는 두 가지 호스트 모드를 지원합니다.
+- Code entities: `file`, `function`, `method`, `class`, `interface`, `type`, `enum`, `external`
+- Relationships: `calls`, `constructs`, `references`, `updates`, `dataflow`
+- UI grouping: `folder -> child folder -> file -> symbol`
+- Framework semantics for React, Vue, Express, and NestJS
 
-- `Sidebar View`: Activity Bar의 Cogic 컨테이너 안에서 열리는 사이드바 Webview
-- `Editor Panel`: 일반 에디터 탭처럼 여는 독립 Webview 패널
+Cogic supports two host modes:
 
-프로젝트는 크게 두 부분으로 나뉩니다.
-
-- `src/`: VS Code extension host, 워크스페이스 연동, 분석, 명령, 디버그 연계
-- `webview-ui/`: React + Vite 기반 그래프 UI
+- `Sidebar View`: the Cogic activity bar view inside the VS Code sidebar
+- `Editor Panel`: a larger editor-style webview panel
 
 ---
 
-## 주요 기능
+## Features
 
-- 활성 파일 또는 워크스페이스 기준 그래프 분석
-- 폴더/파일/심볼 계층 렌더링
-- `1 depth`, `2 depth` 확장 분석
-- 노드 더블클릭 시 코드 위치 이동
-- parameter flow 라벨과 Inspector 연동
-- external node 확장
-- root 고정
-  - `file root`
-  - `folder root`
-- Sidebar / Editor Panel 하이브리드 호스트
-- Inspector 내 설정 화면 전환
-- Inspector 섹션 표시/숨김, 순서 변경, 드래그 정렬
-- JSON / JPG / SVG export
-- VS Code 디버그 프레임 연동
-- Trace / Runtime Debug 모드
-- Scaffold Lab
-  - 폴더 우클릭: 파일/폴더 생성
-  - 파일 우클릭: 함수/클래스/인터페이스/타입 등 생성
+- Active-file and workspace-aware graph analysis
+- File, folder, and symbol grouping
+- Depth-based graph expansion
+- Node selection, double-click navigation, and source range opening
+- External node expansion
+- Parameter flow highlighting and Inspector integration
+- Root file and folder scoping
+- Trace mode for understanding how the graph was built
+- Runtime Debug mode that maps paused stack frames to graph nodes
+- JSON, JPG, and SVG export
+- Scaffold Lab for generating files, folders, functions, classes, interfaces, types, and service/repository pairs
+- In-memory analysis caching for repeated graph analysis and TypeScript `SourceFile` parsing
+- Polished icon-only controls with lightweight hover feedback
 
 ---
 
-## 데모
+## Screenshots
+
+### Graph
 
 ![Demo](assets/Cogic-demo1.png)
 
-## 노드 클릭 데모
+### Node Navigation
 
 ![Node Click Walkthrough](assets/Cogic-NodeClick.gif)
 
-## Trace 데모
+### Trace Mode
 
 ![Trace Walkthrough](assets/Cogic-TraceMode.gif)
 
-## Runtime Debug 데모
+### Runtime Debug
 
 ![Runtime Debug Walkthrough](assets/Cogic-DebugMode.gif)
 
-## 에러 데모
+### Diagnostics
 
 ![Error Demo](assets/error_demo.png)
 
 ---
 
-## 열기 방식
-
-### 명령어
+## Commands
 
 - `Cogic: Open Editor Panel`
 - `Cogic: Focus Sidebar View`
 
-내부 command id는 다음과 같습니다.
+Command IDs:
 
 - `codegraph.open`
 - `codegraph.openSidebar`
 
-### Activity Bar
-
-확장은 `Cogic` Activity Bar 아이콘을 추가합니다. 이 아이콘을 누르면 사이드바 Webview가 열립니다.
+Cogic also contributes an Activity Bar container named `Cogic`.
 
 ---
 
-## 그래프 모델
+## Graph Interaction
 
-현재 analyzer는 아래 구조의 그래프 데이터를 생성합니다.
+- Single click: select a node
+- Double click: open the matching source location
+- File or folder node selection: reveal actions for focusing the graph from that file or folder
+- Canvas controls: zoom in, zoom out, focus selection, and fit graph
+- Top bar controls: refresh, layout, export, trace mode, depth, and project/file context
 
-```ts
-type GraphPayload = {
-  nodes: Array<{
-    id: string;
-    kind: "file" | "function" | "method" | "class" | "interface" | "external";
-    name: string;
-    file: string;
-    parentId?: string;
-    range: {
-      start: { line: number; character: number };
-      end: { line: number; character: number };
-    };
-    signature?: string;
-    sig?: {
-      params: Array<{ name: string; type: string; optional?: boolean }>;
-      returnType?: string;
-    };
-    subkind?: "interface" | "type" | "enum";
-  }>;
-  edges: Array<{
-    id: string;
-    kind: "calls" | "constructs" | "dataflow" | "references" | "updates";
-    source: string;
-    target: string;
-    label?: string;
-  }>;
-};
+---
+
+## Root And Scope
+
+Cogic can keep the graph anchored while you navigate through files.
+
+- File root: keeps graph refreshes anchored to one file
+- Folder root: allows graph refreshes only for files inside that folder
+
+This prevents graph context from changing unexpectedly when you open another file from the graph.
+
+---
+
+## Analysis Cache
+
+Cogic includes an in-memory analysis cache, enabled by default.
+
+The cache stores:
+
+- Full graph analysis results for matching file content, graph depth, trace settings, and workspace file state
+- Parsed TypeScript `SourceFile` objects for unchanged disk files
+- A short-lived workspace file list cache
+
+Active unsaved editor text is always analyzed from the current editor buffer, so unsaved changes are not replaced by stale disk cache entries.
+
+You can disable the cache with:
+
+```json
+{
+  "cogic.analysisCache.enabled": false
+}
 ```
 
-참고:
+---
 
-- 폴더 그룹은 analyzer의 원본 graph node가 아니라 UI 레이아웃 계층입니다.
-- depth 확장 시 많은 파일을 정리해서 보여주기 위해 폴더 계층이 추가됩니다.
+## Trace Mode
+
+Trace mode shows how the analyzer assembled the current graph.
+
+Trace scopes:
+
+- `Single File`: traces only the current file
+- `Current Depth`: traces the current graph depth and keeps the starting file as the trace anchor
+
+Trace mode is useful when validating analyzer behavior or understanding why specific nodes and edges appeared.
 
 ---
 
-## 캔버스 상호작용
+## Runtime Debug Mode
 
-### 노드와 그룹
+Runtime Debug mode connects Cogic to the VS Code debugger.
 
-- `Single click`: 노드 선택
-- `Double click`: 코드 위치 열기
-- 폴더/파일 그룹 클릭: 선택 + 접기/펼치기
-- 폴더/파일이 열릴 때만 카메라가 해당 그룹을 따라감
-- 폴더/파일이 닫힐 때는 카메라를 유지
+It can:
 
-### Top Bar
+- Read the current paused stack frame
+- Map the frame file and line to a graph node
+- Highlight the runtime active node
+- Display frame and variable context in the Inspector
+- Refresh focus while stepping through code
 
-상단 바에서는 다음 기능을 사용할 수 있습니다.
-
-- 활성 파일 선택
-- depth 선택
-- 그래프 검색
-- refresh / reset
-- 레이아웃 유틸리티
-- export
-
-### Parameter Flow
-
-- `dataflow` 엣지를 별도 라벨로 표시
-- 현재 활성 flow를 캔버스와 Inspector에서 함께 강조
-- parameter flow 라벨은 일반 엣지보다 위에 표시
-- Inspector / 캔버스 오버레이 패널은 그보다 더 위 레이어에 표시
-
----
-
-## Inspector
-
-Inspector는 상세 정보 패널이면서 동시에 설정 화면 역할도 합니다.
-
-### Inspector 섹션
-
-- `Active File Snapshot`
-- `Root`
-- `Runtime Frame`
-- `Selected Node`
-- `Selection`
-- `Param Flow`
-- `Analysis`
-
-### Inspector 설정
-
-설정 아이콘을 누르면 작은 메뉴 대신 Inspector 전체가 설정 화면으로 전환됩니다.
-
-설정 화면에서 할 수 있는 일:
-
-- Display Mode 변경
-  - `Sidebar Left`
-  - `Sidebar Right`
-  - `Editor Panel`
-- Inspector Position 변경
-  - `Auto`
-  - `Left`
-  - `Right`
-  - `Bottom`
-- 섹션 표시/숨김
-- 섹션 순서 변경
-- 드래그로 섹션 재정렬
-
-설정은 Webview 로컬 상태로 저장됩니다.
-
----
-
-## Root
-
-Root는 그래프 기준 대상을 고정하는 기능입니다.
-
-- `file root`
-  - 특정 파일을 기준으로 그래프를 고정
-- `folder root`
-  - 특정 폴더를 기준으로 그래프를 고정
-  - 같은 폴더 안의 파일로 이동할 때만 자동 재렌더 허용
-
-이 기능을 사용하면 다른 파일 심볼을 더블클릭해도 그래프 기준이 과하게 흔들리지 않도록 제어할 수 있습니다.
-
----
-
-## Trace 모드
-
-Trace 모드는 현재 그래프가 어떤 순서로 구성되었는지 보여주는 데 초점을 둡니다.
-
-- Trace Scope 지원
-  - `Single File`
-  - `Current Depth`
-- 그래프 생성 이벤트를 단계적으로 재생
-- 현재 trace 단계 노드 강조
-- parameter flow trace 단계 시 flow 강조
-- Inspector에 현재 trace 관련 정보 표시
-- trace 단계가 가리키는 파일 / 폴더 경로 자동 펼침
-
-그래프 생성 과정을 이해하거나 분석 로직을 검증할 때 유용합니다.
-
-### Trace Scope
-
-- `Single File`
-  - 현재 파일만 기준으로 trace를 구성합니다.
-  - graph depth는 사용하지 않습니다.
-- `Current Depth`
-  - 현재 graph depth 기준으로 연결된 파일까지 포함해 trace를 구성합니다.
-  - trace를 시작한 기준 파일을 anchor로 유지합니다.
-
----
-
-## Runtime Debug 모드
-
-Runtime Debug 모드는 VS Code 디버거 상태와 연결됩니다.
-
-- 현재 paused stack frame 수집
-- `file/line` 기준으로 그래프 노드와 매핑
-- runtime active node 강조
-- Inspector에 frame / 변수 정보 표시
-- Inspector에 runtime node 매핑 근거 표시
-  - `Matched by exact range`
-  - `Matched by frame name fallback`
-  - `Matched by nearest in-file node`
-  - `Frame file is outside the current root`
-  - `Frame file is not in the current graph`
-  - `No nearby node matched this frame`
-- Step Over / Step Into 중 그래프 포커스 갱신
-
-참고:
-
-- root가 설정되어 있으면 debug 중에도 root 밖 파일은 자동으로 graph에 확장하지 않습니다.
-- exact range가 없을 때는 제한된 fallback만 허용하여 과도한 오매핑을 줄입니다.
-
-### Trace 모드와 Debug 모드 차이
-
-| 모드 | 보여주는 것 | 기준 데이터 | 용도 |
-| --- | --- | --- | --- |
-| `Trace Mode` | 그래프가 어떻게 만들어졌는지 | analyzer trace event | 분석 과정 이해 |
-| `Debug Mode` | 현재 실행이 어디에 멈춰 있는지 | VS Code debugger 상태 | 런타임 흐름 확인 |
+When a graph root is set, debug-driven graph expansion respects that root.
 
 ---
 
 ## Export
 
-### JSON Export
+Cogic supports:
 
-JSON export에는 다음 정보가 포함됩니다.
-
-- graph nodes / edges
-- active file 정보
-- analysis metadata
-- filter, search query, selection, root, Inspector layout 같은 UI 상태
-
-### JPG Snapshot
-
-JPG export는 현재 보이는 그래프 캔버스를 이미지로 저장합니다.
-
-참고:
-
-- 구조화된 벡터 export가 아니라 렌더 결과 스냅샷입니다.
-- 협업 공유, 문서, 발표 자료 첨부에 적합합니다.
+- JSON export with graph, metadata, filters, search, selection, root, and Inspector state
+- JPG snapshot export of the rendered graph
+- SVG snapshot export of the rendered graph
 
 ---
 
 ## Scaffold Lab
 
-Scaffold Lab은 그래프 컨텍스트에 따라 다른 생성 흐름을 제공합니다.
+Scaffold Lab can generate code from graph context.
 
-- 폴더 우클릭
-  - `File`
-  - `Folder`
-- 파일 우클릭
-  - `Function`
-  - `Class`
-  - `Interface`
-  - `Type`
-  - `Service + Repository`
+Folder targets:
 
-Root가 잡혀 있으면 scaffold target은 root 기준을 우선합니다.
+- File
+- Folder
+
+File targets:
+
+- Function
+- Class
+- Interface
+- Type
+- Service + Repository
+
+When a root is selected, Scaffold Lab prefers that root as the target context.
 
 ---
 
-## Analyzer 확장 구조
+## Analyzer Architecture
 
-최근 analyzer는 프레임워크 전용 로직을 공통 분석기에서 분리했습니다.
-
-- 공통 분석기
-  - AST 순회
-  - 엔티티/엣지 생성
-  - 워크스페이스 해석
-- framework adapter
-  - 특정 프레임워크의 패턴을 semantic node/edge로 승격
-
-관련 경로:
+Core analyzer paths:
 
 - `src/analyzer/analyze.ts`
 - `src/analyzer/adapters/`
 
-### 기본 제공 adapter
+Framework adapters currently include:
 
-- `react`
-  - `useEffect`, `useMemo`, `useCallback`
-  - `useState`, `useReducer`
-- `vue`
-  - `computed`, `watch`, `watchEffect`, `watchPostEffect`, `watchSyncEffect`
-  - `ref`, `reactive`, `shallowRef`, `customRef`
-  - `ref.value = ...`, `reactive.field += ...` 같은 업데이트 추적
-- `express`
-  - `app.get`, `app.post`, `app.use`
-  - `router.get`, `router.post`
-  - inline handler와 named handler route owner 노드 생성
-- `nest`
-  - `@Controller`, `@Get`, `@Post`, `@Patch` 등
-  - controller method 위 route owner 노드 생성
-
-### 예시
-
-- React
-  - `App.useEffect#1`
-  - `App.useState#1`
-- Vue
-  - `useCounter.computed#1`
-  - `useCounter.ref#1`
-  - `useCounter.watch#1`
-- Express
-  - `registerRoutes.route.get:/users#1`
-- Nest
-  - `UsersController.route.get:/users#1`
+- React: hooks such as `useEffect`, `useMemo`, `useCallback`, `useState`, `useReducer`
+- Vue: `computed`, `watch`, `watchEffect`, `ref`, `reactive`, and related updates
+- Express: `app.get`, `app.post`, `app.use`, router handlers, and route owner nodes
+- NestJS: controller decorators and route owner nodes
 
 ---
 
-## 테스트랩
+## Development
 
-Documents 아래에 프레임워크별 테스트랩 샘플을 함께 두고 있습니다.
-
-- React: `C:\Users\SCH\Documents\CodeGraph-TestLab-REACT`
-- Vue: `C:\Users\SCH\Documents\CodeGraph-TestLab-VUE`
-- Express: `C:\Users\SCH\Documents\CodeGraph-TestLab-EXPRESS`
-- Nest: `C:\Users\SCH\Documents\CodeGraph-TestLab-NEST`
-- Debug: `C:\Users\SCH\Documents\CodeGraph-TestLab-DEBUG`
-
-권장 시작 파일:
-
-- React: `src/app/App.tsx`
-- Vue: `src/app/App.ts`
-- Express: `src/server.ts`
-- Nest: `src/modules/users/users.controller.ts`
-- Debug: `src/app/app.js`
-
----
-
-## 메시지 프로토콜
-
-### Webview -> Extension
-
-| Type | 설명 |
-| --- | --- |
-| `requestActiveFile` | 현재 active editor 정보 요청 |
-| `requestWorkspaceFiles` | workspace root / file list 요청 |
-| `requestSelection` | 현재 editor selection 요청 |
-| `requestHostState` | 현재 host kind와 sidebar 위치 요청 |
-| `setTraceState` | trace on/off 및 trace scope 동기화 |
-| `analyzeActiveFile` | 현재 active file 분석 |
-| `analyzeWorkspace` | workspace 기준 분석 |
-| `selectWorkspaceFile` | workspace picker에서 파일 열기 |
-| `expandNode` | external file을 분석해서 현재 graph에 병합 |
-| `setGraphDepth` | graph depth 변경 |
-| `openLocation` | 코드 위치 열기 |
-| `saveExportFile` | JSON/JPG/SVG export를 VS Code 저장 다이얼로그로 저장 |
-| `switchHost` | sidebar / editor panel 전환 |
-
-### Extension -> Webview
-
-| Type | 설명 |
-| --- | --- |
-| `activeFile` | active editor payload |
-| `workspaceFiles` | workspace root / file list |
-| `selection` | 현재 selection payload |
-| `analysisResult` | graph, diagnostics, trace, metadata |
-| `runtimeDebug` | debug session, frame, variable snapshot |
-| `hostState` | 현재 host kind와 sidebar 위치 |
-| `uiNotice` | toast / canvas / inspector notice |
-| `flowExportResult` | JSON/JPG/SVG export 결과 |
-
----
-
-## 아키텍처
-
-```mermaid
-flowchart LR
-  subgraph VSCode[VS Code]
-    EH["Extension Host"]
-    WV["Webview UI"]
-  end
-
-  EH <-->|postMessage| WV
-  EH -->|read| AE["Active Editor / Workspace"]
-  EH -->|analyze| AST["Analyzer + Adapters"]
-  AST --> EH
-  EH -->|results / notices / host state| WV
-```
-
----
-
-## 요구 사항
-
-- Node.js 18+
-- VS Code 1.108+
-
----
-
-## 설치
+Install dependencies:
 
 ```bash
 npm install
@@ -454,69 +219,68 @@ cd webview-ui
 npm install
 ```
 
----
-
-## 개발
-
-### Webview 빌드
+Build the webview:
 
 ```bash
-cd webview-ui
-npm run build
+npm run build:webview
 ```
 
-### 확장 실행
-
-VS Code에서 이 저장소를 연 뒤 `F5`를 눌러 Extension Development Host를 실행합니다.
-
-### 전체 빌드
+Build everything:
 
 ```bash
 npm run build:all
 ```
 
-이 명령은 다음 순서로 실행됩니다.
+Run tests:
 
-1. Webview 빌드
-2. `media/webview`로 복사
-3. extension TypeScript compile
+```bash
+npm test
+```
+
+Package the extension:
+
+```bash
+npm run package:vsix
+```
+
+Publish to Marketplace:
+
+```bash
+npm run publish:marketplace
+```
 
 ---
 
-## 저장소 구조
+## Repository Structure
 
 ```text
 .
-|-- src/                # VS Code extension source
+|-- src/                # VS Code extension host source
 |-- webview-ui/         # React + Vite webview UI
-|-- media/webview/      # built webview output
-|-- assets/             # logo, demo image
-|-- scripts/            # helper scripts
+|-- media/webview/      # Built webview output copied into the extension
+|-- assets/             # Logo and demo assets
+|-- scripts/            # Helper scripts
 |-- package.json
 `-- README.md
 ```
 
 ---
 
-## 현재 참고 사항
+## Notes
 
-- 폴더 그룹은 analyzer 원본 graph schema가 아니라 UI 계층입니다.
-- `Sidebar Right`는 Cogic만 따로 옮기는 방식이 아니라 VS Code sidebar 위치를 전환하는 방식입니다.
-- sidebar host와 editor panel host는 둘 다 지원하지만, 서로 별도 웹뷰 호스트입니다.
-- framework adapter는 계속 확장 가능한 구조이며, 현재는 React / Vue / Express / Nest를 기본 지원합니다.
+- Folder grouping is a UI layout layer, not the raw analyzer graph schema.
+- Sidebar left/right placement follows VS Code's sidebar position.
+- Sidebar and editor panel hosts share the same feature set.
+- Framework adapter support is designed to be extended over time.
 
 ---
 
-## 로드맵
+## Roadmap
 
-- [ ] graph import 지원
-- [ ] 더 큰 workspace를 위한 incremental analysis
-- [ ] route/controller/service 시각 강조 개선
-- [ ] PNG 같은 추가 export preset
-- [ ] framework adapter 추가 확장
-  - Svelte
-  - Fastify
-  - Next.js server actions
+- Incremental workspace analysis for larger repositories
+- More route/controller/service visual emphasis
+- Additional export presets
+- Additional framework adapters such as Svelte, Fastify, and Next.js server actions
 
 ---
 

@@ -6,6 +6,12 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-05-24
+
+- Add analysis cache controls for repeated graph analysis and TypeScript SourceFile parsing.
+- Refresh icon button styling with borderless controls, subtle hover scaling, and improved SVG alignment.
+- Rewrite the README to reflect current Cogic features and Marketplace documentation.
+
 ## [0.0.4] - 2026-05-04
 
 - Fix packaged extension missing TypeScript default library definitions.
