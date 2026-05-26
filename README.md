@@ -115,6 +115,8 @@ This prevents graph context from changing unexpectedly when you open another fil
 
 Cogic includes an in-memory analysis cache, enabled by default.
 
+![Analysis cache toggle](assets/cache_toggle.png)
+
 The cache stores:
 
 - Full graph analysis results for matching file content, graph depth, trace settings, and workspace file state
