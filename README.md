@@ -70,6 +70,10 @@ Cogic supports two host modes:
 
 ![Runtime Debug Walkthrough](assets/Cogic-DebugMode.gif)
 
+### Scaffold Lab
+
+![Scaffold Lab Walkthrough](assets/Cogic_ScaffoldLab.gif)
+
 ### Diagnostics
 
 ![Error Demo](assets/error_demo.png)
