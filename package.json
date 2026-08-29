@@ -92,6 +92,7 @@
     "build:webview": "cd webview-ui && npm run build",
     "copy:webview": "node ./scripts/copy-webview.mjs",
     "build:all": "npm run build:webview && npm run copy:webview && npm run compile",
+    "benchmark:cache": "npm run compile && node ./scripts/benchmark-analysis-cache.mjs",
     "package:vsix": "npx @vscode/vsce package",
     "publish:marketplace": "npx @vscode/vsce publish"
   },

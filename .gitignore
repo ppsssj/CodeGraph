@@ -29,6 +29,11 @@ webview-ui/dist/
 webview-ui/node_modules/
 webview-ui/.vite/
 
+# Benchmark-generated workspaces
+.benchmark-workspaces/
+.benchmark-external/
+benchmark-results/
+
 # --- IDE / OS ---
 .vscode/*
 !.vscode/launch.json

@@ -133,6 +133,12 @@ The cache stores:
 
 Active unsaved editor text is always analyzed from the current editor buffer, so unsaved changes are not replaced by stale disk cache entries.
 
+### Analysis Cache Performance
+
+In a local active-file edit benchmark using the Cogic repository, analysis caching reduced median analysis execution time from approximately 1.09 s to 0.38 s. The benchmark changes the active buffer every iteration, so this result does not rely on full-result cache hits.
+
+Detailed methodology, raw results, correctness validation, and limitations are preserved in [docs/benchmarks/analysis-cache](docs/benchmarks/analysis-cache/README.md).
+
 You can disable the cache with:
 
 ```json
